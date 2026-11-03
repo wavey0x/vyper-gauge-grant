@@ -500,11 +500,36 @@ def vm_weight(ch, arb, market, report, week, sources, total, row):
     return total - sum(ch.voter_weight(a, week) for a in excluded)
 
 
+def check_emissions(ch, week, opening, closing, row):
+    """Cross-check measured accrual against rate x relative weight x one week.
+
+    Skipped across an annual rate cut or a kill, which the accrual measure handles
+    but the closed form does not. Tolerance covers the boundary blocks landing a few
+    seconds after 00:00 UTC (relative weight is at most 1).
+    """
+    if (
+        opening["future_epoch_time"] < week + WEEK
+        or opening["killed"]
+        or closing["killed"]
+    ):
+        row["emissions_check"] = "skipped"
+        return
+    rate = opening["inflation_rate"]
+    expected = rate * opening["relative_weight"] * WEEK // 10**18
+    cap = ch.read("gauge", "max_emissions", block=closing["block"])
+    expected = min(expected, max(0, cap - opening["accrued_crv"]))
+    drift = (opening["timestamp"] - week) + (closing["timestamp"] - week - WEEK)
+    if abs(row["gross_crv"] - expected) > rate * drift + 10**6:
+        raise ValueError(f"Week {week}: accrued CRV disagrees with gauge emission rate")
+    row["emissions_check"] = str(expected)
+
+
 def settled_week(ch, arb, market, report, week, sources, minted, row):
     c = ch.config
     opening, closing = ch.snapshot(week), ch.snapshot(week + WEEK)
     row.update(opening=opening, closing=closing, price=opening["price"])
     row["gross_crv"] = closing["accrued_crv"] - opening["accrued_crv"]
+    check_emissions(ch, week, opening, closing, row)
     total = opening["total_weight"]
     vm = vm_weight(ch, arb, market, report, week, sources, total, row)
     cv = black = cvtotal = 0

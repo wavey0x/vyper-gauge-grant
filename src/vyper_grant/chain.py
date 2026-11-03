@@ -4,6 +4,10 @@ from web3 import Web3
 from .core import Pending, address, check_price, contract, multicall
 
 
+def _uint(raw):
+    return decode(["uint256"], raw)[0]
+
+
 class Chain:
     def __init__(self, client, config):
         self.client = client
@@ -58,7 +62,9 @@ class Chain:
         b = self.first_block(week)
         timestamp = self.block(b)["timestamp"]
         try:
-            price = check_price(self.read("feed", "latestRoundData", block=b), timestamp)
+            price = check_price(
+                self.read("feed", "latestRoundData", block=b), timestamp
+            )
         except ValueError as error:
             raise Pending(f"{error} at week {week}") from error
         receiver, gauge = (
@@ -66,13 +72,20 @@ class Chain:
             self.config["addresses"]["gauge"],
         )
         accrued = self.read("minter", "minted", receiver, gauge, block=b)
-        # Checkpoint and read in ONE eth_call: an unfilled points_weight slot can
-        # otherwise incorrectly read zero.
-        claimable, weight = multicall(
+        # Checkpoint and read in ONE eth_call: unfilled controller slots and a stale
+        # gauge rate would otherwise read incorrectly.
+        g, controller = (
+            self.contracts["gauge"].functions,
+            self.contracts["controller"].functions,
+        )
+        claimable, weight, relative, rate, epoch = multicall(
             self.client,
             [
-                self.contracts["gauge"].functions.claimable_tokens_write(receiver),
-                self.contracts["controller"].functions.points_weight(gauge, week),
+                g.claimable_tokens_write(receiver),
+                controller.points_weight(gauge, week),
+                controller.gauge_relative_weight(gauge, week),
+                g.inflation_rate(),
+                g.future_epoch_time(),
             ],
             b,
         )
@@ -84,8 +97,12 @@ class Chain:
             "oracle_round": str(price[0]),
             "price": price[1],
             "price_updated_at": price[3],
-            "accrued_crv": accrued + decode(["uint256"], claimable)[0],
+            "accrued_crv": accrued + _uint(claimable),
             "total_weight": decode(["uint256", "uint256"], weight)[0],
+            "relative_weight": _uint(relative),
+            "inflation_rate": _uint(rate),
+            "future_epoch_time": _uint(epoch),
+            "killed": self.read("gauge", "is_killed", block=b),
         }
 
     def voter_weight(self, account, week):
