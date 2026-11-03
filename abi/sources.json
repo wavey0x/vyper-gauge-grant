@@ -1,0 +1,68 @@
+{
+  "gauge": {
+    "chain_id": 1,
+    "address": "0x3b8EFAa0A1Fca3d31144002f6D9c7412B967E0b4",
+    "name": "Fundraising Gauge",
+    "compiler": "vyper:0.4.3"
+  },
+  "controller": {
+    "chain_id": 1,
+    "address": "0x2F50D538606Fa9EDD2B11E2446BEb18C9D5846bB",
+    "name": "Vyper_contract",
+    "compiler": "vyper:0.2.4"
+  },
+  "minter": {
+    "chain_id": 1,
+    "address": "0xd061D61a4d941c39E5453435B6345Dc261C2fcE0",
+    "name": "Vyper_contract",
+    "compiler": "vyper:0.2.4"
+  },
+  "feed": {
+    "chain_id": 1,
+    "address": "0xCd627aA160A6fA45Eb793D19Ef54f5062F20f33f",
+    "name": "EACAggregatorProxy",
+    "compiler": "v0.6.6+commit.6c089d02"
+  },
+  "votium": {
+    "chain_id": 1,
+    "address": "0x63942E31E98f1833A234077f47880A66136a2D1e",
+    "name": "Votium",
+    "compiler": "v0.8.13+commit.abaa5c0e"
+  },
+  "remote": {
+    "chain_id": 1,
+    "address": "0x177198aDb759a9715bC7259BE1b7bE535BeD7542",
+    "name": "CampaignRemoteManager",
+    "compiler": "v0.8.28+commit.7893614a"
+  },
+  "market": {
+    "chain_id": 42161,
+    "address": "0x8c2c5A295450DDFf4CB360cA73FCCC12243D14D9",
+    "name": "Votemarket",
+    "compiler": "v0.8.19+commit.7dd6d404"
+  },
+  "usdc": {
+    "chain_id": 1,
+    "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "name": "FiatTokenProxy",
+    "compiler": "v0.4.24+commit.e67f0147",
+    "abi": "minimal ERC20 interface used through the USDC proxy"
+  },
+  "convex": {
+    "chain_id": 1,
+    "address": "0x64D9B5AC386B70af9EDCD20A58cE9262D2EAC278",
+    "source": "https://github.com/convex-eth/voting",
+    "abi": "verified Etherscan source"
+  },
+  "wrapped_usdc": {
+    "chain_id": 42161,
+    "address": "0xc8a096b7D583FC1CC4692563D61d41642cED8441",
+    "abi": "verified Etherscan source"
+  },
+  "multicall": {
+    "chain_id": 1,
+    "address": "0xcA11bde05977b3631167028862bE2a173976CA11",
+    "name": "Multicall3",
+    "note": "aggregate() fragment only"
+  }
+}

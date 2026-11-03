@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vyper-grant"
+version = "0.1.0"
+description = "Yearn's Vyper gauge funding escrow and operations"
+requires-python = ">=3.10"
+dependencies = ["web3==7.16.0", "vyper==0.4.3", "eth-abi>=5,<6"]
+
+[project.optional-dependencies]
+dev = ["titanoboa==0.2.8", "pytest>=8,<9"]
+
+[project.scripts]
+vyper-grant = "vyper_grant.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["fork: reads and simulates deployed contracts using private RPCs"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"contracts" = "vyper_grant/assets/contracts"
+"abi" = "vyper_grant/assets/abi"
+"dashboard/template.html" = "vyper_grant/assets/dashboard/template.html"

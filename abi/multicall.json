@@ -1,0 +1,21 @@
+[
+  {
+    "type": "function",
+    "name": "aggregate",
+    "stateMutability": "payable",
+    "inputs": [
+      {
+        "name": "calls",
+        "type": "tuple[]",
+        "components": [
+          {"name": "target", "type": "address"},
+          {"name": "callData", "type": "bytes"}
+        ]
+      }
+    ],
+    "outputs": [
+      {"name": "blockNumber", "type": "uint256"},
+      {"name": "returnData", "type": "bytes[]"}
+    ]
+  }
+]

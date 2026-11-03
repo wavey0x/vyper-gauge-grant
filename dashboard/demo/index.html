@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vyper Grant</title>
+<style>
+:root{color-scheme:light;--bg:#fff;--surface:#f9fafb;--primary:#111;--secondary:#6a6a6a;--tertiary:#9a9a9a;--strong:#ccc;--subtle:#e6e7eb;--active:#059669;--complete:#2563eb;--settled:#7c3aed;--positive:#15803d;--negative:#b91c1c;--warning:#ca8a04}
+html.dark{color-scheme:dark;--bg:#1a1a1a;--surface:#1e1e1e;--primary:#fafafa;--secondary:#d8d8d8;--tertiary:#a0a0a0;--strong:#404040;--subtle:#2a2a2a;--active:#10b981;--complete:#60a5fa;--settled:#c084fc;--positive:#22c55e;--negative:#ef4444;--warning:#eab308}
+*{box-sizing:border-box}
+html{overflow-y:scroll}
+body{margin:0;background:var(--bg);color:var(--primary);font:13px/18px "IBM Plex Mono","Azeret Mono",SFMono-Regular,Menlo,Consolas,monospace;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+a:hover{color:var(--primary);text-decoration:underline;text-underline-offset:4px}
+button{font:inherit}
+.wrap{max-width:1280px;margin:0 auto;padding:0 16px}
+header{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--strong)}
+header .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;height:48px}
+.brand{font-size:16px;line-height:22px}
+.meta{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--tertiary)}
+.icon-btn{border:0;background:none;color:var(--tertiary);cursor:pointer;padding:2px 4px}
+.icon-btn:hover{color:var(--primary)}
+main{padding:16px 0 56px}
+main>*+*{margin-top:12px}
+.panel{border:1px solid var(--subtle);border-radius:6px;background:var(--surface)}
+.label,th{font-size:11px;line-height:16px;letter-spacing:.08em;text-transform:uppercase;color:var(--tertiary);font-weight:400}
+.badge{display:inline-flex;align-items:center;justify-content:center;min-width:4.5rem;border:1px solid var(--strong);border-radius:6px;padding:1px 6px;font-size:11px;line-height:16px}
+.c-active{color:var(--active)}.c-complete{color:var(--complete)}.c-settled{color:var(--settled)}.c-warning{color:var(--warning)}.c-negative{color:var(--negative)}.c-muted{color:var(--tertiary)}
+.warnings{padding:8px 12px;font-size:12px;color:var(--warning)}
+.warnings div+div{margin-top:2px}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.stat{padding:10px 12px}
+.stat .value{font-size:16px;line-height:22px;margin-top:4px;font-variant-numeric:tabular-nums}
+.stat .sub{font-size:12px;color:var(--tertiary);margin-top:2px}
+.stat.wide{grid-column:span 2}
+.stat.wide .value{font-size:22px;line-height:28px}
+.bar{height:4px;background:var(--subtle);border-radius:2px;margin-top:10px;overflow:hidden}
+.bar span{display:block;height:100%;background:var(--active)}
+.head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--subtle)}
+.head .count{color:var(--tertiary);margin-left:8px}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--secondary)}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:0}
+svg{display:block;width:100%}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;white-space:nowrap}
+th{text-align:left;padding:8px;border-bottom:1px solid var(--strong)}
+td{padding:7px 8px;border-bottom:1px solid var(--subtle);font-size:12px;line-height:16px;color:var(--secondary);font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{padding-left:12px}
+th:last-child,td:last-child{padding-right:12px}
+tr:last-child td{border-bottom:0}
+.num{text-align:right}
+tr.row{cursor:pointer}
+tr.row:hover td{background:var(--bg)}
+tr.detail td{background:var(--bg);white-space:normal}
+pre{margin:0;font-size:11px;line-height:15px;color:var(--tertiary);overflow-x:auto;max-height:320px}
+.empty{color:var(--tertiary);text-align:center;padding:16px}
+footer{position:fixed;inset:auto 0 0 0;border-top:1px solid var(--subtle);background:var(--surface);font-size:12px;color:var(--tertiary)}
+footer .wrap{display:flex;justify-content:center;gap:8px;padding-top:4px;padding-bottom:4px}
+footer a:hover{color:var(--primary)}
+@media(max-width:1000px){.stats{grid-template-columns:repeat(2,1fr)}.meta .block{display:none}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <span class="brand">VYPER GRANT</span>
+  <div class="meta"><span class="block" id="asof"></span><span class="badge" id="status"></span><button class="icon-btn" id="theme" title="Toggle theme" aria-label="Toggle theme">◐</button></div>
+</div></header>
+<main class="wrap">
+  <div class="panel warnings" id="warnings" hidden></div>
+  <section class="stats" id="stats"></section>
+  <section class="panel">
+    <div class="head"><span class="label">Cumulative</span><div class="legend"><span><i style="background:var(--active)"></i>Received value</span><span><i style="background:var(--complete)"></i>Allocated</span></div></div>
+    <div id="chart"></div>
+  </section>
+  <section class="panel" id="weeks"></section>
+  <section class="panel" id="allocations"></section>
+  <section class="panel" id="campaigns"></section>
+</main>
+<footer><div class="wrap" id="links"></div></footer>
+<script>
+const d = {"demo": true, "as_of": 1792886400, "source_block": 26336208, "escrow": null, "target_usdc": 100000000000, "funded_usdc": 100000000000, "recalled_usdc": 0, "allocated_usdc": 42000000000, "balance_usdc": 58130000000, "cost_paid_usdc": 27970000000, "committed_usdc": 13900000000, "refunds_usdc": 130000000, "received_value_usdc": 28038200000, "pending_upper_usdc": 7140000000, "weeks": [{"week": 1790208000, "status": "settled", "gross_crv": "25000000000000000000000", "ratio_numerator": 82, "ratio_denominator": 100, "price": 33000000, "received_value_usdc": 6765000000, "accrued_value_usdc": 6765000000, "reasons": []}, {"week": 1790812800, "status": "settled", "gross_crv": "30000000000000000000000", "ratio_numerator": 86, "ratio_denominator": 100, "price": 29000000, "received_value_usdc": 7482000000, "accrued_value_usdc": 7482000000, "reasons": []}, {"week": 1791417600, "status": "settled", "gross_crv": "32000000000000000000000", "ratio_numerator": 88, "ratio_denominator": 100, "price": 27000000, "received_value_usdc": 7603200000, "accrued_value_usdc": 7603200000, "reasons": []}, {"week": 1792022400, "status": "settled", "gross_crv": "28000000000000000000000", "ratio_numerator": 85, "ratio_denominator": 100, "price": 26000000, "received_value_usdc": 6188000000, "accrued_value_usdc": 6188000000, "reasons": []}, {"week": 1792627200, "status": "pending", "gross_crv": "9000000000000000000000", "price": 25500000, "remaining_crv_upper": "19000000000000000000000", "reasons": ["Emission week is still running"]}], "allocations": [{"round": 132, "timestamp": 1789948800, "votium_amount": 10000000000, "vote_market_amount": 5000000000, "tx": "demo", "campaign": {"id": 41, "tx": "demo", "start": 1790208000, "end": 1791417600, "amount": 5000000000, "paid": 4870000000, "closed": true, "refund": 130000000, "recovery_start": 1805932800, "recovery_end": 1808352000}, "exclusions": {"votium": [], "vote_market": ["0x989AEb4d175e16225E39E87d0D97A3360524AD80"]}}, {"round": 133, "timestamp": 1791158400, "votium_amount": 10000000000, "vote_market_amount": 5000000000, "tx": "demo", "campaign": {"id": 57, "tx": "demo", "start": 1791417600, "end": 1792627200, "amount": 5000000000, "paid": 3100000000, "closed": false, "recovery_start": 1807142400, "recovery_end": 1809561600}, "exclusions": {"votium": [], "vote_market": ["0x989AEb4d175e16225E39E87d0D97A3360524AD80"]}}, {"round": 134, "timestamp": 1792368000, "votium_amount": 12000000000, "vote_market_amount": 0, "tx": "demo", "exclusions": {"votium": [], "vote_market": []}}], "campaigns": [{"id": 41, "tx": "demo", "start": 1790208000, "end": 1791417600, "amount": 5000000000, "paid": 4870000000, "closed": true, "refund": 130000000, "recovery_start": 1805932800, "recovery_end": 1808352000}, {"id": 57, "tx": "demo", "start": 1791417600, "end": 1792627200, "amount": 5000000000, "paid": 3100000000, "closed": false, "recovery_start": 1807142400, "recovery_end": 1809561600}], "warnings": ["Illustrative data. Not a live ledger."], "hold": false, "stop_reached": false};
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// Integer token amounts arrive as numbers or decimal strings; keep six decimals of precision.
+const units = (v, dec = 6) => {
+  if (v === undefined || v === null) return null;
+  const n = BigInt(v), keep = Math.min(dec, 6);
+  return Number(n / 10n ** BigInt(dec - keep)) / 10 ** keep;
+};
+const fmt = (n, digits = 0) => n === null ? "—" : n.toLocaleString("en-US", {minimumFractionDigits: digits, maximumFractionDigits: digits});
+const usd = v => { const n = units(v); return n === null ? "—" : "$" + fmt(n); };
+const crv = v => fmt(units(v, 18));
+const date = t => t ? new Date(Number(t) * 1000).toISOString().slice(0, 10) : "—";
+const short = h => h.slice(0, 6) + "…" + h.slice(-4);
+const isHash = h => /^0x[0-9a-f]{64}$/i.test(h || "");
+const isAddr = h => /^0x[0-9a-f]{40}$/i.test(h || "");
+const tx = (h, arb) => isHash(h) ? `<a href="https://${arb ? "arbiscan.io" : "etherscan.io"}/tx/${h}" target="_blank" rel="noopener">${short(h)} ↗</a>` : "—";
+const badge = (text, tone) => `<span class="badge c-${tone}">${esc(text)}</span>`;
+const pct = (a, b) => b ? fmt(100 * a / b, 1) + "%" : "—";
+
+function table(id, title, cols, rows, render, detail) {
+  const head = cols.map(([label, cls]) => `<th class="${cls || ""}">${label}</th>`).join("");
+  const body = rows.length ? rows.map((r, i) => {
+    const cells = render(r).map((v, j) => `<td class="${cols[j][1] || ""}">${v}</td>`).join("");
+    if (!detail) return `<tr>${cells}</tr>`;
+    return `<tr class="row" data-i="${i}">${cells}</tr><tr class="detail" hidden><td colspan="${cols.length}"><pre>${esc(JSON.stringify(detail(r), null, 2))}</pre></td></tr>`;
+  }).join("") : `<tr><td colspan="${cols.length}" class="empty">None</td></tr>`;
+  $(id).innerHTML = `<div class="head"><span class="label">${title}<span class="count">${rows.length}</span></span></div><div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  $(id).querySelectorAll("tr.row").forEach(tr => tr.onclick = () => { tr.nextElementSibling.hidden = !tr.nextElementSibling.hidden; });
+}
+
+// Header
+const status = d.demo ? ["Demo", "settled"] : d.stop_reached ? ["Complete", "complete"] : d.hold ? ["Hold", "warning"]
+  : Number(d.allocated_usdc) > 0 ? ["Active", "active"] : ["Idle", "muted"];
+$("status").className = "badge c-" + status[1];
+$("status").textContent = status[0];
+$("asof").textContent = d.source_block ? `#${fmt(Number(d.source_block))} · ${new Date(d.as_of * 1000).toISOString().replace("T", " ").slice(0, 16)} UTC` : "";
+
+if ((d.warnings || []).length) {
+  $("warnings").hidden = false;
+  $("warnings").innerHTML = d.warnings.map(w => `<div>! ${esc(w)}</div>`).join("");
+}
+
+// Stats
+const target = units(d.target_usdc ?? 100000e6), received = units(d.received_value_usdc) ?? 0, cost = units(d.cost_paid_usdc) ?? 0;
+const stat = (label, value, sub = "", cls = "") => `<div class="panel stat ${cls}"><div class="label">${label}</div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+$("stats").innerHTML = [
+  stat("Received", usd(d.received_value_usdc), `${pct(received, target)} of $${fmt(target)}<div class="bar"><span style="width:${Math.min(100, 100 * received / target)}%"></span></div>`, "wide"),
+  stat("Pending ≤", usd(d.pending_upper_usdc)),
+  stat("Efficiency", cost > 0 ? fmt(received / cost, 2) + "×" : "—", "value / cost"),
+  stat("Funded", usd(d.funded_usdc), d.recalled_usdc ? "recalled " + usd(d.recalled_usdc) : ""),
+  stat("Allocated", usd(d.allocated_usdc), pct(units(d.allocated_usdc), target) + " of budget"),
+  stat("Balance", usd(d.balance_usdc)),
+  stat("Cost paid", usd(d.cost_paid_usdc)),
+  stat("Committed", usd(d.committed_usdc), "unsettled"),
+  stat("Refunds", usd(d.refunds_usdc)),
+].join("");
+
+// Chart: cumulative received value vs. cumulative allocated USDC, by gauge week
+function chart() {
+  const weeks = d.weeks || [], allocs = d.allocations || [];
+  if (!weeks.length) { $("chart").innerHTML = `<div class="empty">None</div>`; return; }
+  let sum = 0;
+  const pts = weeks.map(w => {
+    sum += units(w.received_value_usdc) ?? 0;
+    const alloc = allocs.filter(a => a.timestamp < Number(w.week) + 604800)
+      .reduce((s, a) => s + units(a.votium_amount) + units(a.vote_market_amount), 0);
+    return [sum, alloc];
+  });
+  const W = $("chart").clientWidth, H = 180, L = 56, R = 28, T = 12, B = 24;
+  const max = Math.max(1, ...pts.flat()) * 1.1;
+  const x = i => L + (weeks.length > 1 ? i * (W - L - R) / (weeks.length - 1) : (W - L - R) / 2);
+  const y = v => T + (H - T - B) * (1 - v / max);
+  const line = (k, color) => `<polyline points="${pts.map((p, i) => `${x(i)},${y(p[k])}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2"/>`
+    + pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(p[k])}" r="2.5" fill="${color}"><title>${date(weeks[i].week)} $${fmt(p[k])}</title></circle>`).join("");
+  const grid = [0, .5, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${y(max * f)}" y2="${y(max * f)}" stroke="var(--subtle)"/><text x="${L - 8}" y="${y(max * f) + 4}" text-anchor="end">$${fmt(max * f / 1000)}k</text>`).join("");
+  const labels = weeks.map((w, i) => `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${date(w.week).slice(5)}</text>`).join("");
+  $("chart").innerHTML = `<svg width="${W}" height="${H}" style="font-size:11px;fill:var(--tertiary)" role="img" aria-label="Cumulative received value and allocated USDC">${grid}${labels}${line(1, "var(--complete)")}${line(0, "var(--active)")}</svg>`;
+}
+chart();
+addEventListener("resize", chart);
+
+// Tables
+table("weeks", "Gauge weeks", [["Week"], ["Status"], ["Gross CRV", "num"], ["Share", "num"], ["CRV/USD", "num"], ["Value", "num"], ["Note"]],
+  (d.weeks || []).slice().reverse(),
+  w => [
+    date(w.week),
+    w.status === "settled" ? badge("Settled", "settled") : badge("Pending", "warning"),
+    w.gross_crv !== undefined ? crv(w.gross_crv) : "—",
+    w.ratio_denominator ? pct(Number(w.ratio_numerator), Number(w.ratio_denominator)) : "—",
+    w.price ? "$" + fmt(units(w.price, 8), 4) : "—",
+    w.received_value_usdc !== undefined ? usd(w.received_value_usdc) : "—",
+    `<span class="c-muted">${esc((w.reasons || [])[0] || "")}</span>`,
+  ], w => w);
+
+table("allocations", "Allocations", [["Round"], ["Date"], ["Votium", "num"], ["VoteMarket", "num"], ["Total", "num"], ["Campaign"], ["Tx"]],
+  (d.allocations || []).slice().reverse(),
+  a => [
+    a.round,
+    date(a.timestamp),
+    usd(a.votium_amount),
+    usd(a.vote_market_amount),
+    usd(BigInt(a.votium_amount || 0) + BigInt(a.vote_market_amount || 0)),
+    a.campaign ? "#" + a.campaign.id : Number(a.vote_market_amount) > 0 ? badge("Undelivered", "warning") : "—",
+    tx(a.tx),
+  ], a => a);
+
+table("campaigns", "VoteMarket campaigns", [["ID"], ["Period"], ["Amount", "num"], ["Paid", "num"], ["Refund", "num"], ["Recovery"], ["Tx"]],
+  (d.campaigns || []).slice().reverse(),
+  c => [
+    "#" + c.id,
+    `${date(c.start)} → ${date(c.end)}`,
+    usd(c.amount),
+    usd(c.paid),
+    c.closed ? usd(c.refund ?? 0) : "—",
+    c.closed ? badge("Closed", "muted") : date(c.recovery_start),
+    tx(c.tx, true),
+  ], c => c);
+
+// Footer
+$("links").innerHTML = [
+  isAddr(d.escrow) && `<a href="https://etherscan.io/address/${d.escrow}" target="_blank" rel="noopener">Escrow ${short(d.escrow)}</a>`,
+  `<a href="https://gov.curve.finance/t/proposal-to-renew-vypers-vefunder-gauge/11160" target="_blank" rel="noopener">Proposal</a>`,
+  `<a href="report.json" download>report.json</a>`,
+].filter(Boolean).join(`<span aria-hidden="true">|</span>`);
+
+// Theme: dark by default, remembered per browser when storage is available
+const root = document.documentElement;
+try { root.classList.toggle("dark", localStorage.getItem("theme") !== "light"); } catch {}
+$("theme").onclick = () => {
+  const dark = root.classList.toggle("dark");
+  try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch {}
+};
+</script>
+</body>
+</html>

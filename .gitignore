@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+build/
+output/
+.env
+config/live.json
+dashboard/dist/
+.hypothesis/
+.coverage
+dist/

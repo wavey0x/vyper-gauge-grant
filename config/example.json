@@ -1,0 +1,19 @@
+{
+  "escrow": null,
+  "deployment_block": null,
+  "arb_scan_from_block": null,
+  "treasury": "0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52",
+  "management": null,
+  "campaign_manager": null,
+  "max_reward_per_vote": 100000,
+  "exclusions": {
+    "votium": [],
+    "vote_market": [
+      "0x989AEb4d175e16225E39E87d0D97A3360524AD80"
+    ]
+  },
+  "addresses": {},
+  "convex_voting_history": [
+    "0x64D9B5AC386B70af9EDCD20A58cE9262D2EAC278"
+  ]
+}
