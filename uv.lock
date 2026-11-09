@@ -2,9 +2,15 @@ version = 1
 revision = 5
 requires-python = ">=3.10"
 resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version >= '3.11' and python_full_version < '3.15'",
-    "python_full_version < '3.11'",
+    "python_full_version >= '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
+    "python_full_version < '3.11' and implementation_name == 'cpython'",
+    "python_full_version < '3.11' and implementation_name == 'pypy'",
+    "python_full_version < '3.11' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 
 [options]
@@ -687,7 +693,9 @@ name = "coverage"
 version = "7.16.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11'",
+    "python_full_version < '3.11' and implementation_name == 'cpython'",
+    "python_full_version < '3.11' and implementation_name == 'pypy'",
+    "python_full_version < '3.11' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/2f/55/d1eaf3e73781174340a00dc1ba2aee8a65f82fadb18e2797b192b6b3925b/coverage-7.16.2.tar.gz", hash = "sha256:ca64d9f1f384f151b9511bec01126072acd2f313439f8ed015a22d8790aab6fa", size = 971999, upload-time = "2026-09-27T12:29:01.118Z" }
 wheels = [
@@ -823,8 +831,12 @@ name = "coverage"
 version = "7.17.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version >= '3.11' and python_full_version < '3.15'",
+    "python_full_version >= '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d2/79/e78bd8f75a9b8e32233ce92d4607f0a21ce88a9156cace2884e7175a82f5/coverage-7.17.0.tar.gz", hash = "sha256:cc010a0a7fbdd9bb8bdfd0d3f04a5151275860213cbd7e2b876b29778489c712", size = 991021, upload-time = "2026-10-22T16:06:50.009Z" }
 wheels = [
@@ -1206,6 +1218,9 @@ wheels = [
 pycryptodome = [
     { name = "pycryptodome" },
 ]
+pysha3 = [
+    { name = "safe-pysha3" },
+]
 
 [[package]]
 name = "eth-keyfile"
@@ -1260,6 +1275,31 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/99/e0/bc1713e0e3d2da8927b5f00291e8228447fb0f52f6411c9497693e78bb75/eth_stdlib-0.2.8.tar.gz", hash = "sha256:cda115a841142d4646e3f05818cbb08e2ca3daafc740646fa5888f9b8db08f97", size = 28067, upload-time = "2025-01-20T21:28:30.994Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/89/c6/301f03a6a82dfe958d2d6593f730582494c4266e02556fd15626c8f5194a/eth_stdlib-0.2.8-py3-none-any.whl", hash = "sha256:77979707e01899c4626b78d20f05a1da6ba1dc3224c0a173259618b7970326e9", size = 37730, upload-time = "2025-01-20T21:28:29.304Z" },
+]
+
+[[package]]
+name = "eth-tester"
+version = "0.13.0b1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "eth-abi" },
+    { name = "eth-account" },
+    { name = "eth-keys" },
+    { name = "eth-utils" },
+    { name = "rlp" },
+    { name = "semantic-version" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/28/3d/d9b8191fd252b3c99c86f939d2fbe5c3cd259984e61505052ccf2a91bc85/eth_tester-0.13.0b1.tar.gz", hash = "sha256:87fb561d450cd3639ce82eed52e566c902a0ac241f3e9581c6b7545690fcece5", size = 102766, upload-time = "2025-04-23T21:02:29.906Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/81/809ff0b461a7f7688925675cb99071b272bf3863e8d16e01a91434f03633/eth_tester-0.13.0b1-py3-none-any.whl", hash = "sha256:872108cea7df1340f56bab25b9ed5cf0f835aa467c1a8195d0891238c0e73ab3", size = 76168, upload-time = "2025-04-23T21:02:28.67Z" },
+]
+
+[package.optional-dependencies]
+py-evm = [
+    { name = "eth-hash", marker = "implementation_name == 'cpython' or implementation_name == 'pypy'" },
+    { name = "eth-hash", extra = ["pycryptodome"], marker = "implementation_name == 'pypy'" },
+    { name = "eth-hash", extra = ["pysha3"], marker = "implementation_name == 'cpython'" },
+    { name = "py-evm" },
 ]
 
 [[package]]
@@ -1449,7 +1489,9 @@ name = "hypothesis"
 version = "6.168.5"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11'",
+    "python_full_version < '3.11' and implementation_name == 'cpython'",
+    "python_full_version < '3.11' and implementation_name == 'pypy'",
+    "python_full_version < '3.11' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 dependencies = [
     { name = "exceptiongroup" },
@@ -1548,8 +1590,12 @@ name = "hypothesis"
 version = "6.170.12"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version >= '3.11' and python_full_version < '3.15'",
+    "python_full_version >= '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 dependencies = [
     { name = "sortedcontainers" },
@@ -1816,7 +1862,9 @@ name = "markdown"
 version = "3.10.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11'",
+    "python_full_version < '3.11' and implementation_name == 'cpython'",
+    "python_full_version < '3.11' and implementation_name == 'pypy'",
+    "python_full_version < '3.11' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/29/6f/da4c6aea59b3001f2e8c0ec7497475aadaf3b021c10cab5b2858f0f32b26/markdown-3.10.3.tar.gz", hash = "sha256:3589362618f743188b4d955b874402bc814f4f83f544dc207719f4baa7d9c45f", size = 372596, upload-time = "2026-07-30T19:05:29.005Z" }
 wheels = [
@@ -1828,8 +1876,12 @@ name = "markdown"
 version = "3.11.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version >= '3.11' and python_full_version < '3.15'",
+    "python_full_version >= '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f4/32/0b4d0297064244f04af4331b65de16237cc3cce07474171ee14222a28981/markdown-3.11.2.tar.gz", hash = "sha256:87bf5d90f2d2882e2c02fcda182c2800456b985bff38913867c49706481514b0", size = 491445, upload-time = "2026-10-19T19:41:42.687Z" }
 wheels = [
@@ -2086,7 +2138,9 @@ name = "multidict"
 version = "7.1.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11'",
+    "python_full_version < '3.11' and implementation_name == 'cpython'",
+    "python_full_version < '3.11' and implementation_name == 'pypy'",
+    "python_full_version < '3.11' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 dependencies = [
     { name = "typing-extensions" },
@@ -2270,8 +2324,12 @@ name = "multidict"
 version = "7.2.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version >= '3.11' and python_full_version < '3.15'",
+    "python_full_version >= '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7b/6b/29ef8e752f5854dcc267ded0652c475bec99b86f255957a0d4fcad657b18/multidict-7.2.1.tar.gz", hash = "sha256:e8af3e6f1bdbc31fd762b094133b478b89988eaebc63cbe82b1d9e3bbd15cede", size = 369994, upload-time = "2026-10-24T20:41:35.457Z" }
 wheels = [
@@ -2471,7 +2529,9 @@ name = "platformdirs"
 version = "4.12.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11'",
+    "python_full_version < '3.11' and implementation_name == 'cpython'",
+    "python_full_version < '3.11' and implementation_name == 'pypy'",
+    "python_full_version < '3.11' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/90/a1/d5f9002a70298c64a789779077d8dd90c10aa1f47fe40c86802df874f2a6/platformdirs-4.12.4.tar.gz", hash = "sha256:63743c02414e755de4e31b8f68125c1407495b86c5a006e203c01ff8b9924250", size = 60010, upload-time = "2026-10-07T23:30:32.426Z" }
 wheels = [
@@ -2483,8 +2543,12 @@ name = "platformdirs"
 version = "4.13.6"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version >= '3.11' and python_full_version < '3.15'",
+    "python_full_version >= '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'cpython'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name == 'pypy'",
+    "python_full_version >= '3.11' and python_full_version < '3.15' and implementation_name != 'cpython' and implementation_name != 'pypy'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1a/43/8c4b5fe23f0e119cf4e1b16c2d16240ab9057cdbb138568c91d5a48abf81/platformdirs-4.13.6.tar.gz", hash = "sha256:211d176e24674b5895dedf9021c262bcf9fad008a70610bfb147d4a8d6d8fe1b", size = 62750, upload-time = "2026-10-27T08:19:11.538Z" }
 wheels = [
@@ -3241,6 +3305,47 @@ wheels = [
 ]
 
 [[package]]
+name = "safe-pysha3"
+version = "1.0.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/42/567532dd77dc81f9462a92edf9b48146c81baf6085397a902b9dab1b1dd2/safe_pysha3-1.0.7.tar.gz", hash = "sha256:0ac3406fbe37c3c961efb446f117deaf3049411d298a6e573cc4bae9732e19a1", size = 829160, upload-time = "2026-10-14T12:15:54.721Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/af/ec/529741c93b9b4f08baf0f0c268b5527166145826085cc6666bc34dc89f93/safe_pysha3-1.0.7-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:29d55016a48f67fbae75a2869864bdbc66758861374a6a0f28949718495bd93d", size = 131500, upload-time = "2026-10-14T12:15:29.011Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/21/bbd07e6dc5225228c02082d0f99fa383620625e0660fedf7f7287297ead5/safe_pysha3-1.0.7-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e8ce2c64805fcc644198bef1a0fb8de1a638c0f1bfa001329ea0fd75a773e7b6", size = 195641, upload-time = "2026-10-14T12:15:30.125Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/34/f117d733c59dbd0c2a8cf95cc0c9fb1c6e07e39fae0e456c13230f84b494/safe_pysha3-1.0.7-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:30bd469c74f609239971531817b651ac2a9f86f94ea9b74e074780c6763c07f0", size = 128110, upload-time = "2026-10-14T12:15:31.628Z" },
+    { url = "https://files.pythonhosted.org/packages/01/cc/d2a02f285ecde2eb7d444dfcc6ec549c5fa50db0bdc18f2c6b3e19da4278/safe_pysha3-1.0.7-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:fc8e98bde699e23dc17128c0d87f7ca9d430407fc5b5eba2802137d0008511f5", size = 189308, upload-time = "2026-10-14T12:15:32.763Z" },
+    { url = "https://files.pythonhosted.org/packages/84/a0/445b7b6bc75a4a6e1beeedaf2a7c18c934726e2a5c2aaf2a497e9b4f3ed5/safe_pysha3-1.0.7-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:488d79ee7ccbef309cb76f424b33c7cfea17caa134fb1ff1ad9dc7d110a93b0d", size = 132806, upload-time = "2026-10-14T12:15:34.021Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/ed/3579256a3941c8c27fdcabad649f180c6bd7b6e5be4a752aefb400fd8e65/safe_pysha3-1.0.7-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4b5240408d8240c0cc238ec13b0bed54adfb264feaae1163d0b12f722e2e3ab4", size = 196992, upload-time = "2026-10-14T12:15:35.28Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/19/dbd8895ff1d6ae147fef036c200633defd3227f1fad580805d6e218d331e/safe_pysha3-1.0.7-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:64bf068593354a47a161c9342f88c2b90fb5270e602c0524e8831583532fc939", size = 129590, upload-time = "2026-10-14T12:15:36.355Z" },
+    { url = "https://files.pythonhosted.org/packages/37/05/68ea0e5b0fc8987e0bd5952c5fb207fc03c0dc464358a27dad856e4bef47/safe_pysha3-1.0.7-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:7fcc86dcb3293a31e0333c88cbfc0f0cea63e4ec01924aaa332e69043c104a8d", size = 190623, upload-time = "2026-10-14T12:15:37.294Z" },
+    { url = "https://files.pythonhosted.org/packages/46/12/93030939c50ea9c68a16103b65c1d2c015dfe74d06443003d510ea76b52e/safe_pysha3-1.0.7-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1574f6092f5e9f8196457d0831474b8d9a7773f0880044ab8a6f8cfb6621d0ae", size = 132630, upload-time = "2026-10-14T12:15:38.186Z" },
+    { url = "https://files.pythonhosted.org/packages/df/76/9cfe8a083fa14f7f6367cadd141dcee9dd12f88d8f7ed6c20bbdae99aabe/safe_pysha3-1.0.7-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8de1c17b9df84117a4250bae982a1ca18724de3713ffa33a849c682390cfdba2", size = 197270, upload-time = "2026-10-14T12:15:39.418Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/2c/dbdadc9b0e90a26f406f5d23db69a67b32d612a1fd641b0dc8e3529545b1/safe_pysha3-1.0.7-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:e7c8ea872f17e633b994622dc2c24fce0b2f3c9a35ac8caec8031c63dae00c82", size = 129282, upload-time = "2026-10-14T12:15:40.388Z" },
+    { url = "https://files.pythonhosted.org/packages/50/be/12428516f15aa7fbb6406befff187d9fa067136d2adb76d99eda8e3d68f2/safe_pysha3-1.0.7-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:6afd35e3789bfbde99adb44cec823690ce44235d9a9b65448d4d83da6c26bf7f", size = 190819, upload-time = "2026-10-14T12:15:41.387Z" },
+    { url = "https://files.pythonhosted.org/packages/53/50/baa9822ea29641a4900b4df36ebde7346a8fcb66180468d14904ace4d0ae/safe_pysha3-1.0.7-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1db29cf13f28999f05d3e0078cc6ed4dfb9a900df3c4d9499d3aa865e8141463", size = 132763, upload-time = "2026-10-14T12:15:42.62Z" },
+    { url = "https://files.pythonhosted.org/packages/97/a9/3a98d45e064a2dcab9cd2c04f3fe5944ba4fdd4a74b4f8b084e2acd04872/safe_pysha3-1.0.7-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a8fc5869a7310a21f3e50f21a64c7f34d1601288a63c1d51010830963c3ea747", size = 197372, upload-time = "2026-10-14T12:15:43.762Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/85/9a82b34a32d31700019efb90ee3d4c86f3b6763d6b848e842bd19904ca74/safe_pysha3-1.0.7-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:173b178abeb466614b533e4b6a2d88b9859f8000261b8119706de5908aeb819b", size = 129400, upload-time = "2026-10-14T12:15:44.811Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/ee/e0f24dd3b5da9c0db70342a6cb80a1fa391fe19f76b1f51da1ef956a8c1a/safe_pysha3-1.0.7-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:0bfc11f61118227488ce7830c46406e324bef78932aa473bac03e564dac7d148", size = 190901, upload-time = "2026-10-14T12:15:45.747Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/a4/c2c40999b6de06af5032678983266a8f0bcf351a9ba8b771551e367c5c48/safe_pysha3-1.0.7-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3aea2115dc13c54836ef4e1e9c1a71e83fa74ec1ffd57f9d64b8493931834c18", size = 132771, upload-time = "2026-10-14T12:15:46.681Z" },
+    { url = "https://files.pythonhosted.org/packages/16/2d/7174506bc69ea8e3391d7bbee5c9f339e444e86186790050594191b0a657/safe_pysha3-1.0.7-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d93cb8edbbb6b3a890d527b856bc8775f0afd719477d22afd96e5c376cc399ee", size = 197343, upload-time = "2026-10-14T12:15:47.888Z" },
+    { url = "https://files.pythonhosted.org/packages/73/c8/b7d331fbbc5c33e24e3518ce89779c2209238f4e96a12072f2839b340112/safe_pysha3-1.0.7-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:78f946743fcb3cca48408d74d0f56d1035d091523d81799274858f9def897900", size = 129513, upload-time = "2026-10-14T12:15:48.816Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/b0/5eab47b9e8f73425a4896c53033b448eb375111de794c346ed617e5a3ef2/safe_pysha3-1.0.7-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:faace7b6534052571b360aaa831e7ef17c0ac46ce7de427559995f27d9304290", size = 190883, upload-time = "2026-10-14T12:15:49.767Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/85/e820f3b680f45af41cee89df2c309a3acc5f3e22902b3461629f977e77f2/safe_pysha3-1.0.7-cp315-cp315-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2c703e5ec3beb135b49fe88213c66f7d64b5b0f01cefe2f295087049a348ae7d", size = 133308, upload-time = "2026-10-14T12:15:50.779Z" },
+    { url = "https://files.pythonhosted.org/packages/24/31/665ce127d2082aab4473941756af76501a8e1a96fba37ff051029f3a396b/safe_pysha3-1.0.7-cp315-cp315-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:2dcb571dd50c3400446a650df416f9828278d1c089466189aba0736872f9648d", size = 202979, upload-time = "2026-10-14T12:15:51.801Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/0c/63ddfc28e9a09f83401d186474b0593e1a4598fad4c2fb445ecf6346f899/safe_pysha3-1.0.7-cp315-cp315-musllinux_1_2_aarch64.whl", hash = "sha256:d4be23c5f995e6b691247bcf8410e6cb55ab1ca0c80b083b21566e200e9d9509", size = 130130, upload-time = "2026-10-14T12:15:52.721Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/3a/96594d948ab91be607e1bb70bdab7190d5014613f8ca6c6cef44a1a9ea5a/safe_pysha3-1.0.7-cp315-cp315-musllinux_1_2_x86_64.whl", hash = "sha256:c3778bb47d1a445e7d34060a12e62eda05a0a81c129e793121d750d3cd20ccb2", size = 196444, upload-time = "2026-10-14T12:15:53.718Z" },
+]
+
+[[package]]
+name = "semantic-version"
+version = "2.10.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/31/f2289ce78b9b473d582568c234e104d2a342fd658cc288a7553d83bb8595/semantic_version-2.10.0.tar.gz", hash = "sha256:bdabb6d336998cbb378d4b9db3a4b56a1e3235701dc05ea2690d9a997ed5041c", size = 52289, upload-time = "2022-05-26T13:35:23.454Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/23/8146aad7d88f4fcb3a6218f41a60f6c2d4e3a72de72da1825dc7c8f7877c/semantic_version-2.10.0-py2.py3-none-any.whl", hash = "sha256:de78a3b8e0feda74cabc54aab2da702113e33ac9d9eb9d2389bcf1f58b7d9177", size = 15552, upload-time = "2022-05-26T13:35:21.206Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3466,23 +3571,23 @@ wheels = [
 
 [[package]]
 name = "vyper-grant"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "eth-abi" },
     { name = "vyper" },
     { name = "web3" },
 ]
 
 [package.optional-dependencies]
 dev = [
+    { name = "eth-tester", extra = ["py-evm"] },
     { name = "pytest" },
     { name = "titanoboa" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "eth-abi", specifier = ">=5,<6" },
+    { name = "eth-tester", extras = ["py-evm"], marker = "extra == 'dev'", specifier = "==0.13.0b1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<9" },
     { name = "titanoboa", marker = "extra == 'dev'", specifier = "==0.2.8" },
     { name = "vyper", specifier = "==0.4.3" },

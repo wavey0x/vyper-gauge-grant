@@ -1,6 +1,8 @@
-from pathlib import Path
+"""A static, self-contained report; no browser RPC or external scripts."""
+
 import json
-from .core import ROOT
+from pathlib import Path
+from .core import ROOT, atomic_json
 
 
 def render(data, out):
@@ -14,4 +16,4 @@ def render(data, out):
     )
     template = (ROOT / "dashboard/template.html").read_text()
     (out / "index.html").write_text(template.replace("/*REPORT_DATA*/{}", payload))
-    (out / "report.json").write_text(json.dumps(data, indent=2) + "\n")
+    atomic_json(out / "report.json", data)

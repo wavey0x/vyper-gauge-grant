@@ -1,164 +1,43 @@
 {
   "demo": true,
-  "as_of": 1792886400,
-  "source_block": 26336208,
-  "escrow": null,
-  "target_usdc": 100000000000,
-  "funded_usdc": 100000000000,
-  "recalled_usdc": 0,
-  "allocated_usdc": 42000000000,
-  "balance_usdc": 58130000000,
-  "cost_paid_usdc": 27970000000,
-  "committed_usdc": 13900000000,
-  "refunds_usdc": 130000000,
-  "received_value_usdc": 28038200000,
-  "pending_upper_usdc": 7140000000,
+  "as_of": "1794250000",
+  "budget": "100000000000",
+  "spent": "12000000000",
+  "funding_assets": "88420000000",
+  "proceeds_balance": "15600000000000000000000",
+  "withdrawn_crvusd": "0",
+  "totals": {
+    "output": "26000000000000000000000",
+    "retained": "15600000000000000000000"
+  },
   "weeks": [
     {
-      "week": 1790208000,
-      "status": "settled",
-      "gross_crv": "25000000000000000000000",
-      "ratio_numerator": 82,
-      "ratio_denominator": 100,
-      "price": 33000000,
-      "received_value_usdc": 6765000000,
-      "accrued_value_usdc": 6765000000,
-      "reasons": []
+      "week": "1792627200",
+      "paid": "4000000000",
+      "ready": true,
+      "yearn": "3",
+      "total": "5",
+      "retained": "5300000000000000000000",
+      "status": "Settled"
     },
     {
-      "week": 1790812800,
-      "status": "settled",
-      "gross_crv": "30000000000000000000000",
-      "ratio_numerator": 86,
-      "ratio_denominator": 100,
-      "price": 29000000,
-      "received_value_usdc": 7482000000,
-      "accrued_value_usdc": 7482000000,
-      "reasons": []
+      "week": "1793232000",
+      "paid": "4000000000",
+      "ready": true,
+      "yearn": "3",
+      "total": "5",
+      "retained": "6100000000000000000000",
+      "status": "Settled"
     },
     {
-      "week": 1791417600,
-      "status": "settled",
-      "gross_crv": "32000000000000000000000",
-      "ratio_numerator": 88,
-      "ratio_denominator": 100,
-      "price": 27000000,
-      "received_value_usdc": 7603200000,
-      "accrued_value_usdc": 7603200000,
-      "reasons": []
-    },
-    {
-      "week": 1792022400,
-      "status": "settled",
-      "gross_crv": "28000000000000000000000",
-      "ratio_numerator": 85,
-      "ratio_denominator": 100,
-      "price": 26000000,
-      "received_value_usdc": 6188000000,
-      "accrued_value_usdc": 6188000000,
-      "reasons": []
-    },
-    {
-      "week": 1792627200,
-      "status": "pending",
-      "gross_crv": "9000000000000000000000",
-      "price": 25500000,
-      "remaining_crv_upper": "19000000000000000000000",
-      "reasons": [
-        "Emission week is still running"
-      ]
+      "week": "1793836800",
+      "paid": "4000000000",
+      "ready": true,
+      "yearn": "3",
+      "total": "5",
+      "retained": "4200000000000000000000",
+      "status": "Earning"
     }
   ],
-  "allocations": [
-    {
-      "round": 132,
-      "timestamp": 1789948800,
-      "votium_amount": 10000000000,
-      "vote_market_amount": 5000000000,
-      "tx": "demo",
-      "campaign": {
-        "id": 41,
-        "tx": "demo",
-        "start": 1790208000,
-        "end": 1791417600,
-        "amount": 5000000000,
-        "paid": 4870000000,
-        "closed": true,
-        "refund": 130000000,
-        "recovery_start": 1805932800,
-        "recovery_end": 1808352000
-      },
-      "exclusions": {
-        "votium": [],
-        "vote_market": [
-          "0x989AEb4d175e16225E39E87d0D97A3360524AD80"
-        ]
-      }
-    },
-    {
-      "round": 133,
-      "timestamp": 1791158400,
-      "votium_amount": 10000000000,
-      "vote_market_amount": 5000000000,
-      "tx": "demo",
-      "campaign": {
-        "id": 57,
-        "tx": "demo",
-        "start": 1791417600,
-        "end": 1792627200,
-        "amount": 5000000000,
-        "paid": 3100000000,
-        "closed": false,
-        "recovery_start": 1807142400,
-        "recovery_end": 1809561600
-      },
-      "exclusions": {
-        "votium": [],
-        "vote_market": [
-          "0x989AEb4d175e16225E39E87d0D97A3360524AD80"
-        ]
-      }
-    },
-    {
-      "round": 134,
-      "timestamp": 1792368000,
-      "votium_amount": 12000000000,
-      "vote_market_amount": 0,
-      "tx": "demo",
-      "exclusions": {
-        "votium": [],
-        "vote_market": []
-      }
-    }
-  ],
-  "campaigns": [
-    {
-      "id": 41,
-      "tx": "demo",
-      "start": 1790208000,
-      "end": 1791417600,
-      "amount": 5000000000,
-      "paid": 4870000000,
-      "closed": true,
-      "refund": 130000000,
-      "recovery_start": 1805932800,
-      "recovery_end": 1808352000
-    },
-    {
-      "id": 57,
-      "tx": "demo",
-      "start": 1791417600,
-      "end": 1792627200,
-      "amount": 5000000000,
-      "paid": 3100000000,
-      "closed": false,
-      "recovery_start": 1807142400,
-      "recovery_end": 1809561600
-    }
-  ],
-  "warnings": [
-    "Illustrative data. Not a live ledger."
-  ],
-  "hold": false,
-  "stop_reached": false
+  "warnings": []
 }

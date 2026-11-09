@@ -4,13 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vyper-grant"
-version = "0.1.0"
+version = "0.2.0"
 description = "Yearn's Vyper gauge funding escrow and operations"
 requires-python = ">=3.10"
-dependencies = ["web3==7.16.0", "vyper==0.4.3", "eth-abi>=5,<6"]
+dependencies = [
+    "web3==7.16.0",
+    "vyper==0.4.3",
+]
 
 [project.optional-dependencies]
-dev = ["titanoboa==0.2.8", "pytest>=8,<9"]
+dev = [
+    "titanoboa==0.2.8",
+    "pytest>=8,<9",
+    "eth-tester[py-evm]==0.13.0b1",
+]
 
 [project.scripts]
 vyper-grant = "vyper_grant.cli:main"

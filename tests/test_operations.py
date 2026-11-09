@@ -1,281 +1,259 @@
-import os
+"""Exercise the real Python workflow against deployed contracts on an in-memory EVM."""
+
+import json
+from functools import lru_cache
 import pytest
-from web3 import Web3
-from vyper_grant.core import ADDRESSES, UNIT, address, artifact, call, contract
-from vyper_grant.cli import prepare, campaign_action
-from vyper_grant.reconcile import reconcile
+from eth_tester import EthereumTester
+from web3 import Web3, EthereumTesterProvider
+from vyper import compile_code
+from vyper_grant.core import ADDRESSES, ROOT, WEEK, artifact
+from vyper_grant.chain import verify, reconcile, historical_vote
+from vyper_grant.cli import setup, doctor
+from vyper_grant.keeper import run
 
 
-@pytest.mark.fork
-@pytest.mark.skipif(not os.environ.get("OPS_FORK_RPC"), reason="Local Anvil fork only")
-def test_prepare_send_and_reconcile_real_votium(tmp_path, monkeypatch):
-    url = os.environ["OPS_FORK_RPC"]
-    assert url.startswith(("http://127.0.0.1:", "http://localhost:"))
-    w = Web3(Web3.HTTPProvider(url))
-    snapshot = w.provider.make_request("evm_snapshot", [])["result"]
-    try:
-        manager, treasury, arb = w.eth.accounts[:3]
-        a = ADDRESSES
-        compiled = artifact()
-        factory = w.eth.contract(abi=compiled["abi"], bytecode=compiled["bytecode"])
-        tx = factory.constructor(
-            a["usdc"],
-            treasury,
-            manager,
-            a["gauge"],
-            a["votium"],
-            a["remote"],
-            a["market"],
-            arb,
-            100000,
-        ).transact({"from": manager})
-        receipt = w.eth.wait_for_transaction_receipt(tx)
-        assert receipt["status"] == 1
-        escrow = receipt["contractAddress"]
-        holder = address("0x55FE002aefF02F77364de339a1292923A15844B8")
-        w.provider.make_request("anvil_impersonateAccount", [holder])
-        w.provider.make_request("anvil_setBalance", [holder, hex(10**18)])
-        t = contract(w, "usdc")
-        w.eth.wait_for_transaction_receipt(
-            t.functions.transfer(escrow, 100000 * UNIT).transact({"from": holder})
-        )
-        w.provider.make_request("anvil_mine", [hex(65)])
-        config = {
-            "escrow": escrow,
-            "deployment_block": receipt["blockNumber"],
-            "management": manager,
-            "treasury": treasury,
-            "campaign_manager": arb,
-            "addresses": ADDRESSES,
-            "exclusions": {"votium": [], "vote_market": []},
-            "max_reward_per_vote": 100000,
-        }
-        batch = prepare(w, None, config, 1000 * UNIT, 0, 0, tmp_path / "report.json")
-        original_get_block = w.eth.get_block
-        final_number = original_get_block("finalized")["number"]
-
-        def changed_block(identifier, *args, **kwargs):
-            value = original_get_block(identifier, *args, **kwargs)
-            if identifier == final_number:
-                return {**value, "hash": b"z" * 32}
-            return value
-
-        with monkeypatch.context() as patch:
-            patch.setattr(w.eth, "get_block", changed_block)
-            with pytest.raises(ValueError, match="reorganized"):
-                reconcile(w, None, config)
-        call = batch["transactions"][0]
-        tx = w.eth.send_transaction(
-            {
-                "from": manager,
-                "to": call["to"],
-                "value": int(call["value"]),
-                "data": call["data"],
-            }
-        )
-        assert w.eth.wait_for_transaction_receipt(tx)["status"] == 1
-        w.provider.make_request("anvil_mine", [hex(65)])
-        result = reconcile(w, None, config)
-        assert result["allocated_usdc"] == 1000 * UNIT
-        assert result["balance_usdc"] == 99000 * UNIT
-        assert result["cost_paid_usdc"] == 20 * UNIT
-        assert result["committed_usdc"] == 980 * UNIT
-        assert len(result["allocations"]) == 1
-        assert result["delivery_pending"] == 0
-    finally:
-        w.provider.make_request("evm_revert", [snapshot])
-
-
-@pytest.mark.fork
-@pytest.mark.skipif(
-    not os.environ.get("OPS_FORK_RPC") or not os.environ.get("OPS_ARB_FORK_RPC"),
-    reason="Two local Anvil forks required",
-)
-def test_mixed_delivery_correlation_and_cancelled_campaign_refund(tmp_path):
-    from eth_abi import encode
-    from web3.logs import DISCARD
-
-    source = os.environ["OPS_FORK_RPC"]
-    destination = os.environ["OPS_ARB_FORK_RPC"]
-    assert source.startswith("http://127.0.0.1:") and destination.startswith(
-        "http://127.0.0.1:"
+@lru_cache
+def mock_artifact(name):
+    return compile_code(
+        (ROOT / "tests/mocks" / f"{name}.vy").read_text(),
+        output_formats=["abi", "bytecode"],
     )
-    w = Web3(Web3.HTTPProvider(source))
-    arb = Web3(Web3.HTTPProvider(destination))
-    snapshots = [
-        x.provider.make_request("evm_snapshot", [])["result"] for x in [w, arb]
-    ]
-    try:
-        manager, treasury = w.eth.accounts[:2]
-        a = ADDRESSES
-        campaign_manager = address("0xFE11a5009f2121622271e7dd0FD470264e076af6")
-        assert arb.eth.get_code(campaign_manager)
-        compiled = artifact()
-        factory = w.eth.contract(abi=compiled["abi"], bytecode=compiled["bytecode"])
-        receipt = w.eth.wait_for_transaction_receipt(
-            factory.constructor(
-                a["usdc"],
-                treasury,
-                manager,
-                a["gauge"],
-                a["votium"],
-                a["remote"],
-                a["market"],
-                campaign_manager,
-                100000,
-            ).transact({"from": manager})
-        )
-        escrow = receipt["contractAddress"]
-        holder = address("0x55FE002aefF02F77364de339a1292923A15844B8")
-        w.provider.make_request("anvil_impersonateAccount", [holder])
-        w.provider.make_request("anvil_setBalance", [holder, hex(10**18)])
-        w.eth.wait_for_transaction_receipt(
-            contract(w, "usdc")
-            .functions.transfer(escrow, 100000 * UNIT)
-            .transact({"from": holder})
-        )
-        w.provider.make_request("anvil_mine", [hex(65)])
-        config = {
-            "escrow": escrow,
-            "deployment_block": receipt["blockNumber"],
-            "arb_scan_from_block": arb.eth.block_number,
-            "management": manager,
-            "treasury": treasury,
-            "campaign_manager": campaign_manager,
-            "addresses": ADDRESSES,
-            "exclusions": {"votium": [], "vote_market": [a["convex_voter"]]},
-            "max_reward_per_vote": 100000,
-        }
-        batch = prepare(
-            w, arb, config, 500 * UNIT, 500 * UNIT, 1000, tmp_path / "mixed.json"
-        )
-        tx = batch["transactions"][0]
-        receipt = w.eth.wait_for_transaction_receipt(
-            w.eth.send_transaction(
-                {
-                    "from": manager,
-                    "to": tx["to"],
-                    "data": tx["data"],
-                    "value": int(tx["value"]),
-                }
-            )
-        )
-        assert receipt["status"] == 1
-        lp_addr = call(w, a["remote"], "LA_POSTE", outputs=("address",))
-        lp = contract(w, "laposte", lp_addr)
-        sent = lp.events.MessageSent().process_receipt(receipt, errors=DISCARD)
-        assert len(sent) == 1
-        m = sent[0]["args"]["message"]
-        full = (
-            m["destinationChainId"],
-            m["to"],
-            m["sender"],
-            [(x["tokenAddress"], x["amount"]) for x in m["tokens"]],
-            [(x["name"], x["symbol"], x["decimals"]) for x in m["tokenMetadata"]],
-            m["payload"],
-            m["nonce"],
-        )
-        encoded = encode(
-            [
-                "(uint256,address,address,(address,uint256)[],(string,string,uint8)[],bytes,uint256)"
-            ],
-            [full],
-        )
-        dest_lp = contract(arb, "laposte", lp_addr)
-        adapter = dest_lp.functions.adapter().call()
-        arb.provider.make_request("anvil_impersonateAccount", [adapter])
-        arb.provider.make_request("anvil_setBalance", [adapter, hex(10**18)])
-        delivered = arb.eth.wait_for_transaction_receipt(
-            dest_lp.functions.receiveMessage(1, encoded).transact(
-                {"from": adapter, "gas": 4000000}
-            )
-        )
-        assert delivered["status"] == 1
-        received = dest_lp.events.MessageReceived().process_receipt(
-            delivered, errors=DISCARD
-        )
-        assert len(received) == 1 and received[0]["args"]["success"]
-        w.provider.make_request("anvil_mine", [hex(65)])
-        arb.provider.make_request("anvil_mine", [hex(65)])
-        result = reconcile(w, arb, config)
-        assert len(result["campaigns"]) == 1 and result["delivery_pending"] == 0
-        campaign = result["campaigns"][0]
-        assert (
-            result["committed_usdc"] == 990 * UNIT
-            and result["cost_paid_usdc"] == 10 * UNIT
-        )
-        arb.provider.make_request("anvil_impersonateAccount", [campaign_manager])
-        arb.provider.make_request("anvil_setBalance", [campaign_manager, hex(10**18)])
-        recovery = campaign_action(arb, config, campaign["id"], "close")
-        assert (
-            recovery["chainId"] == "42161"
-            and recovery["meta"]["safeAddress"] == campaign_manager
-        )
-        recovery_tx = recovery["transactions"][0]
-        closed = arb.eth.wait_for_transaction_receipt(
-            arb.eth.send_transaction(
-                {
-                    "from": campaign_manager,
-                    "to": recovery_tx["to"],
-                    "data": recovery_tx["data"],
-                    "value": int(recovery_tx["value"]),
-                }
-            )
-        )
-        assert closed["status"] == 1
-        arb.provider.make_request("anvil_mine", [hex(65)])
-        result = reconcile(w, arb, config)
-        assert result["refunds_usdc"] == 500 * UNIT
-        assert (
-            result["cost_paid_usdc"] == 10 * UNIT
-            and result["committed_usdc"] == 490 * UNIT
-        )
-        assert result["campaigns"][0]["paid"] == 0 and result["campaigns"][0]["closed"]
-    finally:
-        for client, snapshot in zip([w, arb], snapshots):
-            client.provider.make_request("evm_revert", [snapshot])
 
 
-@pytest.mark.fork
-@pytest.mark.skipif(
-    not os.environ.get("OPS_ARB_FORK_RPC"), reason="Local Arbitrum fork required"
-)
-def test_votemarket_can_simulate_unclaimed_period_without_transaction():
-    from eth_abi import encode
-    from vyper_grant.reconcile import vm_period
+@pytest.fixture
+def chain(monkeypatch):
+    tester = EthereumTester()
+    client = Web3(EthereumTesterProvider(tester))
+    deployer, manager, receiver, voter, keeper, payee = client.eth.accounts[:6]
+    client.eth.default_account = deployer
 
-    url = os.environ["OPS_ARB_FORK_RPC"]
-    assert url.startswith("http://127.0.0.1:")
-    w = Web3(Web3.HTTPProvider(url))
-    snapshot = w.provider.make_request("evm_snapshot", [])["result"]
-    try:
-        m = contract(w, "market")
-        pid = 2108
-        week = 1793232000
-        original = m.functions.periodByCampaignId(pid, week).call()
-        assert original[3]
-        # Make the existing period unprocessed on this disposable fork. Locate its
-        # nested mapping by matching the original data, rather than guessing a slot.
-        matches = []
-        for slot in range(32):
-            outer = Web3.keccak(encode(["uint256", "uint256"], [pid, slot]))
-            base = int.from_bytes(
-                Web3.keccak(encode(["uint256", "bytes32"], [week, outer])), "big"
-            )
-            if (
-                int.from_bytes(w.eth.get_storage_at(m.address, base), "big")
-                == original[0]
-                and int.from_bytes(w.eth.get_storage_at(m.address, base + 1), "big")
-                == original[1]
-            ):
-                matches.append(base)
-        assert len(matches) == 1
-        w.provider.make_request(
-            "anvil_setStorageAt", [m.address, hex(matches[0] + 3), "0x" + "00" * 32]
+    def deploy(compiled, *args):
+        factory = client.eth.contract(
+            abi=compiled["abi"], bytecode=compiled["bytecode"]
         )
-        assert not m.functions.periodByCampaignId(pid, week).call()[3]
-        period = vm_period(w, m, pid, week, "latest")
-        assert period["updated"] is True
-        assert not m.functions.periodByCampaignId(pid, week).call()[3]
-    finally:
-        w.provider.make_request("evm_revert", [snapshot])
+        receipt = client.eth.wait_for_transaction_receipt(
+            factory.constructor(*args).transact()
+        )
+        return client.eth.contract(address=receipt.contractAddress, abi=compiled["abi"])
+
+    usdc, crv, usd = [deploy(mock_artifact("Token")) for _ in range(3)]
+    vault = deploy(mock_artifact("Vault"), usdc.address)
+    gauge = deploy(mock_artifact("System"), crv.address, receiver)
+    pool = deploy(mock_artifact("Pool"), crv.address, usd.address)
+    start = (client.eth.get_block("latest").timestamp // WEEK + 1) * WEEK
+    funding = deploy(artifact("funding"), vault.address, manager, payee, start, 4)
+    escrow = deploy(
+        artifact("proceeds"),
+        funding.address,
+        crv.address,
+        usd.address,
+        gauge.address,
+        gauge.address,
+        gauge.address,
+        voter,
+        pool.address,
+    )
+    c = json.loads((ROOT / "config/example.json").read_text())
+    c.update(
+        funding=funding.address,
+        proceeds=escrow.address,
+        payee=payee,
+        start=start,
+        weeks=4,
+        keeper=keeper,
+        deployment_block=1,
+    )
+    for key, val in dict(
+        manager=manager,
+        usdc=usdc.address,
+        vault=vault.address,
+        crv=crv.address,
+        crvusd=usd.address,
+        gauge=gauge.address,
+        receiver=receiver,
+        voter=voter,
+        controller=gauge.address,
+        minter=gauge.address,
+        pool=pool.address,
+    ).items():
+        monkeypatch.setitem(ADDRESSES, key, val)
+    usdc.functions.mint(manager, 100_000 * 10**6).transact()
+    usdc.functions.approve(vault.address, 100_000 * 10**6).transact({"from": manager})
+    vault.functions.deposit(100_000 * 10**6, funding.address).transact(
+        {"from": manager}
+    )
+    gauge.functions.toggle_approve_mint(escrow.address).transact({"from": receiver})
+    crv.functions.approve(escrow.address, 10**30).transact({"from": receiver})
+    escrow.functions.set_keeper(keeper, True).transact({"from": manager})
+    escrow.functions.set_limits(1000 * 10**18, 0, 200).transact({"from": manager})
+    for w in range(start - WEEK, start + 5 * WEEK, WEEK):
+        gauge.functions.set_weight(
+            w, 4 * (start + 52 * WEEK - w) * 10**12, 10**16 + 17
+        ).transact()
+    gauge.functions.set_vote(voter, 10**12, start + 52 * WEEK, start - 1).transact()
+    return dict(locals())
+
+
+def activate(s):
+    s["funding"].functions.purchase(
+        s["start"], 1000 * 10**6, b"proof".ljust(32, b"\0")
+    ).transact({"from": s["manager"]})
+    s["escrow"].functions.activate().transact({"from": s["manager"]})
+    s["tester"].time_travel(s["start"] + 40000)
+    s["tester"].mine_block()
+
+
+def test_verified_contracts_and_idempotent_setup(chain):
+    s = chain
+    funding, escrow = verify(s["client"], s["c"])
+    assert (
+        funding.address == s["funding"].address
+        and escrow.address == s["escrow"].address
+    )
+    vyper, manager = setup(s["client"], s["c"], 10**25)
+    assert (
+        len(vyper["transactions"]) == 1
+    )  # No toggle that would revoke existing permission.
+    assert len(manager["transactions"]) == 3
+    assert doctor(s["client"], s["c"])["mint_enabled"]
+    bad = {**s["c"], "payee": s["keeper"]}
+    with pytest.raises(ValueError, match="PAYEE"):
+        verify(s["client"], bad)
+    bad = {**s["c"], "funding": s["gauge"].address}
+    with pytest.raises(ValueError, match="bytecode"):
+        verify(s["client"], bad)
+
+
+def test_keeper_simulation_and_full_report_survive_recovery(chain, tmp_path):
+    s = chain
+    activate(s)
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "checkpoint" and result["dry_run"]
+    s["client"].eth.send_transaction(
+        {"from": s["keeper"], "to": result["to"], "data": result["data"]}
+    )
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "sale"
+    s["client"].eth.send_transaction(
+        {"from": s["keeper"], "to": result["to"], "data": result["data"]}
+    )
+    report = reconcile(s["client"], s["c"])
+    assert report["spent"] == str(1000 * 10**6)
+    assert int(report["totals"]["retained"]) > 0
+    assert int(report["proceeds_balance"]) == int(report["totals"]["retained"])
+    s["escrow"].functions.recover(
+        s["usd"].address, int(report["proceeds_balance"])
+    ).transact({"from": s["manager"]})
+    recovered = reconcile(s["client"], s["c"])
+    assert recovered["proceeds_balance"] == "0"
+    assert recovered["totals"] == report["totals"]
+    assert recovered["withdrawn_crvusd"] == report["proceeds_balance"]
+
+
+def test_archive_read_excludes_boundary_block_revote(chain):
+    s = chain
+    s["tester"].time_travel(s["start"])
+    tx = (
+        s["gauge"]
+        .functions.set_vote(s["voter"], 2 * 10**12, s["start"] + 52 * WEEK, s["start"])
+        .transact()
+    )
+    block = s["client"].eth.get_block(
+        s["client"].eth.get_transaction_receipt(tx).blockNumber
+    )
+    assert block.timestamp == s["start"]
+    evidence = historical_vote(
+        s["client"], s["start"], s["client"].eth.get_block("finalized")
+    )
+    assert evidence["slope"] == 10**12
+    assert evidence["block"] == block.number - 1
+
+
+def test_reconciliation_detects_false_manager_recovery(chain):
+    s = chain
+    activate(s)
+    s["gauge"].functions.set_vote(
+        s["voter"], 2 * 10**12, s["start"] + 52 * WEEK, s["start"]
+    ).transact()
+    s["escrow"].functions.repair_week(
+        s["start"], 0, 0, 0, b"bad".ljust(32, b"\0")
+    ).transact({"from": s["manager"]})
+    s["escrow"].functions.checkpoint().transact()
+    with pytest.raises(ValueError, match="historical state"):
+        reconcile(s["client"], s["c"])
+
+
+def test_week_tail_below_minimum_still_finalizes(chain, tmp_path):
+    s = chain
+    activate(s)
+    s["escrow"].functions.checkpoint().transact()
+    # Isolate the final unpaid interval: the keeper must still close the programme.
+    end = s["funding"].functions.END().call()
+    s["tester"].time_travel(end - 10)
+    s["escrow"].functions.checkpoint().transact()
+    s["tester"].time_travel(end + 10)
+    # Existing booked CRV is sold first; then the final checkpoint is prepared.
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "sale"
+    s["client"].eth.send_transaction(
+        {"from": s["keeper"], "to": result["to"], "data": result["data"]}
+    )
+    # Drain the remaining lot in bounded trades.
+    for _ in range(10):
+        result = run(s["client"], s["c"], directory=tmp_path)
+        if result["status"] == "checkpoint":
+            break
+        assert result["status"] == "sale"
+        s["client"].eth.send_transaction(
+            {"from": s["keeper"], "to": result["to"], "data": result["data"]}
+        )
+    assert result["status"] == "checkpoint"
+
+
+def test_keeper_signed_journal_recovers_uncertain_broadcast(
+    chain, tmp_path, monkeypatch
+):
+    s = chain
+    activate(s)
+    # Expose mainnet chain ID for signing; all execution stays in the local EVM.
+    monkeypatch.setattr(type(s["client"].eth), "chain_id", property(lambda _: 1))
+    monkeypatch.setenv(
+        "KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex()
+    )
+    original = s["client"].eth.send_raw_transaction
+    sent = []
+
+    def uncertain(raw):
+        sent.append(bytes(raw))
+        raise ConnectionError("connection lost before response")
+
+    monkeypatch.setattr(s["client"].eth, "send_raw_transaction", uncertain)
+    with pytest.raises(ConnectionError):
+        run(s["client"], s["c"], True, tmp_path)
+    saved = json.loads((tmp_path / "pending.json").read_text())
+    assert saved["hash"] == Web3.to_hex(Web3.keccak(sent[0]))
+    assert bytes.fromhex(saved["raw"]) == sent[0]
+    monkeypatch.setattr(s["client"].eth, "send_raw_transaction", original)
+    assert run(s["client"], s["c"], True, tmp_path)["status"] == "pending"
+    assert run(s["client"], s["c"], True, tmp_path)["status"] == "confirming"
+    s["tester"].mine_blocks(2)
+    result = run(s["client"], s["c"], True, tmp_path)
+    assert result["status"] == "sale"
+    second = json.loads((tmp_path / "pending.json").read_text())
+    assert second["nonce"] == saved["nonce"] + 1
+    assert s["escrow"].functions.total_sold().call() > 0
+
+
+def test_keeper_rejects_changed_configuration_with_pending_transaction(
+    chain, tmp_path, monkeypatch
+):
+    s = chain
+    activate(s)
+    monkeypatch.setattr(type(s["client"].eth), "chain_id", property(lambda _: 1))
+    monkeypatch.setenv(
+        "KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex()
+    )
+    run(s["client"], s["c"], True, tmp_path)
+    changed = {**s["c"], "keeper": s["manager"]}
+    with pytest.raises(ValueError, match="another keeper configuration"):
+        run(s["client"], changed, True, tmp_path)

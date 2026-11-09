@@ -1,6 +1,10 @@
 # pragma version ==0.4.3
 balanceOf: public(HashMap[address, uint256])
 allowance: public(HashMap[address, HashMap[address, uint256]])
+rejected: address
+@external
+def reject(account: address):
+    self.rejected = account
 @external
 def mint(account: address, amount: uint256):
     self.balanceOf[account] += amount
@@ -10,6 +14,7 @@ def approve(spender: address, amount: uint256) -> bool:
     return True
 @external
 def transfer(to: address, amount: uint256) -> bool:
+    assert to != self.rejected, "recipient rejected"
     self.balanceOf[msg.sender] -= amount
     self.balanceOf[to] += amount
     return True

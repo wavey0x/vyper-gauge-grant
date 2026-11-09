@@ -1,48 +1,246 @@
-from fractions import Fraction
+from random import Random
+import boa
 import pytest
-from vyper_grant.core import credit, value_for_week, usdc
+from conftest import WEEK, UNIT, advance
+from test_escrow import REF, begin, sale
+from vyper_grant.accounting import partition, weight
 
 
-def test_ratio_converts_cvx_and_deduplicates():
-    ratio = credit(1000, 500, 400, 25, 100)
-    assert ratio == Fraction(4, 5)
-    v = value_for_week(0, 10000 * 10**18, 10000 * 10**18, ratio, 25_000_000)
-    assert (
-        v["credited_crv"] == 8000 * 10**18 and v["received_value_usdc"] == 2000 * 10**6
+def test_conservative_bound_under_arbitrary_checkpoint_partitions():
+    rng = Random(356)
+    for _ in range(3000):
+        cap = rng.randrange(10**10)
+        remaining, upper, actual, assigned = cap, 0, 0, 0
+        for _ in range(rng.randint(1, 10)):
+            numerator, seconds = rng.randrange(10**20), rng.randrange(1, 10000)
+            u, l = numerator * seconds // UNIT, numerator // UNIT * seconds
+            raw, left = 0, seconds
+            while left:
+                dt = rng.randint(1, left)
+                raw += numerator * dt // UNIT
+                left -= dt
+            segment = min(raw, remaining)
+            lower = min(l, max(0, cap - upper))
+            assert lower <= segment <= u
+            assigned, actual = assigned + lower, actual + segment
+            upper, remaining = upper + u, remaining - segment
+        assert assigned <= actual <= cap
+
+
+@pytest.mark.parametrize("cut_offset", [-1, 0, 1, 3600])
+def test_annual_cut_and_boundary_partition_match_reference(system, cut_offset):
+    s = system
+    cut = s.start + WEEK + cut_offset
+    s.gauge.set_params(s.gauge.max_emissions(), s.gauge.inflation_rate(), cut, False)
+    begin(s, 3)
+    anchor = s.escrow.cursor()
+    accrued = s.escrow.accrued()
+    rate, epoch = s.gauge.inflation_rate(), s.gauge.future_epoch_time()
+    previous = {
+        w: s.escrow.weeks(w).earned
+        for w in [s.start, s.start + WEEK, s.start + 2 * WEEK]
+    }
+    for t in [
+        s.start + WEEK - 1,
+        s.start + WEEK,
+        s.start + WEEK + 1,
+        s.start + WEEK + 4000,
+        s.start + 2 * WEEK + 1,
+    ]:
+        advance(t)
+        s.gauge.user_checkpoint(s.receiver)
+    stop = boa.env.evm.patch.timestamp
+    weights = {w: s.gauge.gauge_relative_weight(s.gauge.address, w) for w in previous}
+    rows, low, high, _, _ = partition(
+        anchor, stop, rate, epoch, s.escrow.cap() - accrued, weights
     )
+    s.escrow.checkpoint()
+    assert low <= s.escrow.accrued() - accrued <= high
+    for w in previous:
+        assert s.escrow.weeks(w).earned - previous[w] == sum(
+            n for week, n in rows if week == w
+        )
 
 
-def test_partial_mint_credits_only_program_interval():
-    v = value_for_week(
-        1000 * 10**18, 2000 * 10**18, 1500 * 10**18, Fraction(1, 2), 25_000_000
+@pytest.mark.parametrize("cap_fraction", [1, 2, 3])
+def test_cap_near_boundary_never_assigns_future_week_earnings(system, cap_fraction):
+    s = system
+    # Activate at the boundary of the preceding week so its cap consumption is explicit.
+    per_second = (
+        s.gauge.inflation_rate()
+        * s.gauge.gauge_relative_weight(s.gauge.address, s.start)
+        // UNIT
     )
-    assert v["received_credited_crv"] == 250 * 10**18
-    assert v["received_value_usdc"] == 62_500_000
-    assert (
-        value_for_week(1000, 2000, 900, Fraction(1), 25_000_000)["received_value_usdc"]
-        == 0
+    cap = per_second * ((s.start - boa.env.evm.patch.timestamp) + WEEK) + cap_fraction
+    s.gauge.set_params(
+        cap, s.gauge.inflation_rate(), s.gauge.future_epoch_time(), False
     )
+    with boa.env.prank(s.manager):
+        s.funding.purchase(s.start, 1, REF)
+        s.funding.purchase(s.start + WEEK, 1, REF)
+        s.escrow.activate()
+    advance(s.start)
+    s.gauge.user_checkpoint(s.receiver)
+    before = s.gauge.integrate_fraction(s.receiver)
+    advance(s.start + WEEK)
+    s.gauge.user_checkpoint(s.receiver)
+    first = s.gauge.integrate_fraction(s.receiver) - before
+    before = s.gauge.integrate_fraction(s.receiver)
+    advance(s.start + WEEK + 3600)
+    s.gauge.user_checkpoint(s.receiver)
+    second = s.gauge.integrate_fraction(s.receiver) - before
+    s.escrow.checkpoint()
+    assert s.escrow.weeks(s.start).earned <= first
+    assert s.escrow.weeks(s.start + WEEK).earned <= second
+    assert s.escrow.total_earned() <= first + second
 
 
-def test_weights_zero_all_blacklisted_and_raw_unit_errors():
-    assert credit(0, 0, 0, 0, 0) == 0
-    assert credit(1000, 0, 1000, 100, 100) == 0
-    with pytest.raises(ValueError):
-        credit(1000, 1000, 1000, 0, 100)
-    with pytest.raises(ValueError):
-        credit(1000, 0, 100, 101, 100)
-    with pytest.raises(ValueError):
-        credit(1000, 0, 100, 0, 0)
+def test_third_party_claims_and_partial_sales_do_not_duplicate_earnings(system):
+    s = system
+    begin(s)
+    with boa.env.prank(s.receiver):
+        s.gauge.toggle_approve_mint(s.stranger)
+    with boa.env.prank(s.stranger):
+        s.gauge.mint_for(s.gauge.address, s.receiver)
+    advance(s.start + 7200)
+    s.escrow.checkpoint()
+    earned = s.escrow.total_earned()
+    sale(s, 10 * UNIT)
+    sale(s)
+    assert s.escrow.total_sold() == earned
+    assert s.escrow.checkpoint() == 0
+    assert s.escrow.next_sale() == (0, 0)
 
 
-def test_large_integer_rounding_is_exact():
-    n = 10**35 + 1
-    r = Fraction(1, 3)
-    result = value_for_week(0, n, n, r, 27_123_456)
-    assert result["received_value_usdc"] == n * 27_123_456 // (3 * 10**20)
+def test_return_transfer_failure_rolls_back_claim_pull_and_swap(system):
+    s = system
+    begin(s)
+    minted = s.gauge.minted(s.receiver, s.gauge.address)
+    balance = s.crv.balanceOf(s.receiver)
+    s.usd.reject(s.receiver)
+    with boa.reverts("recipient rejected"):
+        sale(s)
+    assert s.gauge.minted(s.receiver, s.gauge.address) == minted
+    assert s.crv.balanceOf(s.receiver) == balance
+    assert s.escrow.total_sold() == s.escrow.total_output() == 0
 
 
-def test_usdc_rejects_fractional_base_unit():
-    assert usdc("0.000001") == 1
-    with pytest.raises(ValueError):
-        usdc("0.0000001")
+def test_expired_vote_and_zero_total_are_distinct(system):
+    s = system
+    s.gauge.set_vote(s.voter, 10**12, s.start, s.start - 1)
+    begin(s)
+    sale(s)
+    assert s.escrow.total_retained() == 0
+    assert s.usd.balanceOf(s.receiver) == s.escrow.total_output()
+    assert weight(10**12, s.start, s.start) == 0
+
+
+def test_cap_change_stops_new_accrual_but_recovery_remains_available(system):
+    s = system
+    begin(s)
+    s.gauge.set_params(
+        s.gauge.max_emissions() + 1,
+        s.gauge.inflation_rate(),
+        s.gauge.future_epoch_time(),
+        False,
+    )
+    advance(s.start + 7200)
+    with boa.reverts("cap changed"):
+        s.escrow.checkpoint()
+    with boa.env.prank(s.manager):
+        s.escrow.set_paused(True)
+        s.funding.recover(s.vault.address, s.vault.balanceOf(s.funding.address))
+    assert s.funding.spent() == 1000 * 10**6
+    assert s.funding.remaining() == 99000 * 10**6
+
+
+def test_final_week_tail_is_booked_and_end_is_terminal(system):
+    s = system
+    last = s.funding.END() - WEEK
+    with boa.env.prank(s.manager):
+        s.funding.purchase(last, 1, REF)
+        s.escrow.activate()
+    advance(s.funding.END() + 100)
+    s.escrow.checkpoint()
+    assert s.escrow.weeks(last).earned > 0
+    cursor = s.escrow.cursor()
+    advance(s.funding.END() + WEEK)
+    assert s.escrow.checkpoint() == 0
+    assert s.escrow.cursor() == cursor
+
+
+def test_missing_mint_permission_and_revoked_keeper(system):
+    s = system
+    with boa.env.prank(s.receiver):
+        s.gauge.toggle_approve_mint(s.escrow.address)
+    with boa.env.prank(s.manager), boa.reverts("mint permission"):
+        s.escrow.activate()
+    with boa.env.prank(s.receiver):
+        s.gauge.toggle_approve_mint(s.escrow.address)
+    begin(s)
+    with boa.env.prank(s.manager):
+        s.escrow.set_keeper(s.keeper, False)
+    with boa.reverts("keeper or paused"):
+        sale(s)
+
+
+def test_maximum_catchup_fits_transaction_gas(system):
+    s = system
+    # Reuse the real contract sources with a full-length programme.
+    from conftest import ROOT
+
+    funding = boa.load(
+        str(ROOT / "contracts/FundingEscrow.vy"),
+        s.vault.address,
+        s.manager,
+        s.payee,
+        s.start,
+        52,
+    )
+    escrow = boa.load(
+        str(ROOT / "contracts/ProceedsEscrow.vy"),
+        funding.address,
+        s.crv.address,
+        s.usd.address,
+        s.gauge.address,
+        s.gauge.address,
+        s.gauge.address,
+        s.voter,
+        s.pool.address,
+    )
+    s.usdc.mint(s.manager, 100_000 * 10**6)
+    with boa.env.prank(s.manager):
+        s.usdc.approve(s.vault.address, 100_000 * 10**6)
+        s.vault.deposit(100_000 * 10**6, funding.address)
+        for i in range(52):
+            funding.purchase(s.start + i * WEEK, 10**6, REF)
+    with boa.env.prank(s.receiver):
+        s.gauge.toggle_approve_mint(escrow.address)
+    for w in range(s.start - WEEK, s.start + 65 * WEEK, WEEK):
+        s.gauge.set_weight(w, 4 * max(0, s.start + 52 * WEEK - w) * 10**12, 10**16 + 17)
+    with boa.env.prank(s.manager):
+        escrow.activate()
+    gas = 0
+    for _ in range(4):
+        advance(escrow.cursor() + 16 * WEEK)
+        escrow.checkpoint()
+        gas = max(gas, escrow._computation.get_gas_used())
+    assert gas < 15_000_000
+    assert escrow.weeks(s.start + 51 * WEEK).ready
+    assert escrow.total_earned() > 0
+    print("maximum catch-up gas:", gas)
+
+
+def test_excessive_downtime_preserves_accounting_and_recovery(system):
+    s = system
+    with boa.env.prank(s.manager):
+        s.escrow.activate()
+    cursor = s.escrow.cursor()
+    advance(cursor + 16 * WEEK + 1)
+    with boa.reverts("catch-up limit"):
+        s.escrow.checkpoint()
+    assert s.escrow.cursor() == cursor
+    assert s.escrow.total_earned() == 0
+    with boa.env.prank(s.manager):
+        s.funding.recover(s.vault.address, s.vault.balanceOf(s.funding.address))
+    assert s.vault.balanceOf(s.funding.address) == 0

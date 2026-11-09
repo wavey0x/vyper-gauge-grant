@@ -1,133 +1,197 @@
 import boa
-import pytest
+from conftest import WEEK, UNIT, advance
 
-U = 10**6
-MAX = 2**256 - 1
-
-
-def allocate(s, v=1000 * U, vm=0, cap=0, fee=0, vl=(), ml=()):
-    e, _, _, _, manager, *_ = s
-    with boa.env.prank(manager):
-        e.allocate(v, vm, cap, list(vl), list(ml), value=fee)
+REF = b"purchase".ljust(32, b"\0")
 
 
-def ordered(*accounts):
-    return sorted(accounts, key=lambda x: int(str(x), 16))
+def begin(s, weeks=1):
+    with boa.env.prank(s.manager):
+        for i in range(weeks):
+            s.funding.purchase(s.start + i * WEEK, 1000 * 10**6, REF)
+        s.escrow.activate()
+    advance(s.start + 3600)
+    s.escrow.checkpoint()
 
 
-def test_constructor_approves_markets_once(system):
-    e, t, m, *_ = system
-    assert t.allowance(e.address, m.address) == MAX
+def sale(s, amount=None):
+    week, available = s.escrow.next_sale()
+    amount = available if amount is None else amount
+    quote = s.escrow.quote(amount)
+    with boa.env.prank(s.keeper):
+        s.escrow.sell(
+            week, amount, quote * 99 // 100, boa.env.evm.patch.timestamp + 120
+        )
+    return amount, quote
 
 
-def test_allocate_once_per_round_and_never_funds_operator(system):
-    e, t, m, treasury, manager, *_ = system
-    allocate(system)
-    assert e.allocated() == 1000 * U and e.used_rounds(135)
-    assert t.balanceOf(manager) == 0 and t.balanceOf(m.address) == 1000 * U
-    with boa.reverts("round used"):
-        allocate(system)
-    m.settings(136, 50, False, False)
-    allocate(system)
-    assert e.allocated() == 2000 * U
+def test_budget_is_assets_not_shares_or_yield(system):
+    s = system
+    s.usdc.mint(s.vault.address, 10_000 * 10**6)
+    s.vault.configure(11 * UNIT // 10, False)
+    assert s.funding.assets() == 110_000 * 10**6
+    with boa.env.prank(s.manager):
+        s.funding.purchase(s.start, 60_000 * 10**6, REF)
+        s.funding.purchase(s.start + WEEK, 40_000 * 10**6, REF)
+        with boa.reverts("budget"):
+            s.funding.purchase(s.start + 2 * WEEK, 1, REF)
+    assert s.funding.spent() == 100_000 * 10**6
+    assert s.funding.remaining() == 0
+    assert s.usdc.balanceOf(s.payee) == 100_000 * 10**6
+    assert s.funding.assets() >= 9999 * 10**6
 
 
-def test_roles(system):
-    e, t, m, treasury, manager, receiver, arb, stranger = system
-    for caller in [manager, stranger]:
-        with boa.env.prank(caller), boa.reverts("treasury"):
-            e.recallUSDC(U)
-    with boa.env.prank(stranger), boa.reverts("management"):
-        e.allocate(U, 0, 0, [], [])
-    with boa.env.prank(stranger), boa.reverts("management"):
-        e.withdrawUnprocessedVotium(135, U)
-    with boa.env.prank(treasury):
-        e.recallUSDC(100_000 * U)
-    assert t.balanceOf(treasury) == 100_000 * U
+def test_failed_withdrawal_does_not_spend_budget(system):
+    s = system
+    s.vault.configure(UNIT, True)
+    with boa.env.prank(s.manager), boa.reverts("withdrawal"):
+        s.funding.purchase(s.start, 100 * 10**6, REF)
+    assert s.funding.spent() == s.funding.paid(s.start) == 0
 
 
-def test_votium_exclusions_passed_through(system):
-    e, t, m, treasury, manager, receiver, arb, stranger = system
-    accounts = ordered(receiver, stranger)
-    allocate(system, vl=accounts)
-    assert [str(m.last_excluded(i)) for i in range(2)] == [str(a) for a in accounts]
+def test_purchase_permissions_and_unique_future_weeks(system):
+    s = system
+    with boa.env.prank(s.stranger), boa.reverts("manager"):
+        s.funding.purchase(s.start, 1, REF)
+    with boa.env.prank(s.manager):
+        for week in [s.start + 1, s.start - WEEK, s.start + 8 * WEEK]:
+            with boa.reverts("week"):
+                s.funding.purchase(week, 1, REF)
+        s.funding.purchase(s.start, 1, REF)
+        with boa.reverts("future unpaid week"):
+            s.funding.purchase(s.start, 1, REF)
+        advance(s.start + WEEK)
+        with boa.reverts("future unpaid week"):
+            s.funding.purchase(s.start + WEEK, 1, REF)
 
 
-@pytest.mark.parametrize("bad", ["duplicate", "unsorted"])
-def test_exclusions_must_be_sorted_unique(system, bad):
-    _, _, _, _, _, receiver, _, stranger = system
-    a, b = ordered(receiver, stranger)
-    with boa.reverts("sorted unique nonzero"):
-        allocate(system, vl=[a, a] if bad == "duplicate" else [b, a])
+def test_atomic_split_excludes_old_wallet_and_escrow_balances(system):
+    s = system
+    s.crv.mint(s.receiver, 900 * UNIT)
+    s.usd.mint(s.escrow.address, 500 * UNIT)
+    begin(s)
+    old = s.usd.balanceOf(s.escrow.address)
+    amount, quote = sale(s)
+    assert s.usd.balanceOf(s.receiver) == quote - quote // 4
+    assert s.usd.balanceOf(s.escrow.address) == old + quote // 4
+    assert s.escrow.total_retained() == quote // 4
+    assert s.escrow.total_sold() == amount
+    assert s.crv.balanceOf(s.receiver) >= 900 * UNIT
+    with boa.env.prank(s.manager):
+        s.escrow.set_paused(True)
+        s.escrow.recover(s.usd.address, old + quote // 4)
+    assert s.escrow.total_retained() == quote // 4
 
 
-def test_votium_exclusions_disabled_rolls_back(system):
-    e, t, m, treasury, manager, receiver, *_ = system
-    m.settings(135, 0, False, False)
-    with boa.reverts("exclusions disabled"):
-        allocate(system, vl=[receiver])
-    assert e.allocated() == 0 and not e.used_rounds(135)
+def test_midweek_revote_preserves_frozen_ratio(system):
+    s = system
+    begin(s, 2)
+    s.gauge.set_vote(s.voter, 2 * 10**12, s.start + 52 * WEEK, s.start + 3600)
+    advance(s.start + 7200)
+    s.escrow.checkpoint()
+    assert s.escrow.weeks(s.start).yearn * 4 == s.escrow.weeks(s.start).total
+    advance(s.start + WEEK + 3600)
+    s.escrow.checkpoint()
+    assert (
+        s.escrow.weeks(s.start + WEEK).yearn * 2 == s.escrow.weeks(s.start + WEEK).total
+    )
 
 
-def test_vm_fixed_recipient_token_duration_and_exclusions(system):
-    e, t, m, treasury, manager, receiver, arb, stranger = system
-    allocate(system, v=0, vm=2000 * U, cap=1000, fee=10**12, ml=[receiver])
-    c = m.last_campaign()
-    assert str(c.gauge) == str(m.address) and str(c.manager) == str(arb)
-    assert str(c.rewardToken) == str(t.address) and c.numberOfPeriods == 2
-    assert c.isWhitelist is False and [str(a) for a in c.addresses] == [str(receiver)]
-    assert t.balanceOf(e.address) == 98000 * U
+def test_missing_vote_never_becomes_zero_and_repair_is_immutable(system):
+    s = system
+    with boa.env.prank(s.manager):
+        s.funding.purchase(s.start, 1000 * 10**6, REF)
+        s.escrow.activate()
+    advance(s.start + 1)
+    s.gauge.set_vote(s.voter, 2 * 10**12, s.start + 52 * WEEK, s.start)
+    with boa.reverts("vote history"):
+        s.escrow.checkpoint()
+    assert not s.escrow.weeks(s.start).ready
+    with boa.env.prank(s.stranger), boa.reverts("manager evidence"):
+        s.escrow.repair_week(s.start, 10**12, s.start + 52 * WEEK, s.start - 1, REF)
+    with boa.env.prank(s.manager):
+        s.escrow.repair_week(s.start, 10**12, s.start + 52 * WEEK, s.start - 1, REF)
+        with boa.reverts("vote history"):
+            s.escrow.repair_week(s.start, 0, 0, 0, REF)
+    s.escrow.checkpoint()
+    assert s.escrow.weeks(s.start).yearn > 0
 
 
-def test_failed_market_rolls_back_spend_and_round(system):
-    e, t, m, *_ = system
-    m.settings(135, 50, False, True)
-    with boa.reverts("market failed"):
-        allocate(system)
-    assert e.allocated() == 0 and not e.used_rounds(135)
-    assert t.balanceOf(e.address) == 100000 * U
+def test_sale_access_and_failures_are_atomic(system):
+    s = system
+    begin(s)
+    week, amount = s.escrow.next_sale()
+    quote = s.escrow.quote(amount)
+    now = boa.env.evm.patch.timestamp
+    minted = s.gauge.minted(s.receiver, s.gauge.address)
+    with boa.env.prank(s.stranger), boa.reverts("keeper or paused"):
+        s.escrow.sell(week, amount, quote, now)
+    with boa.env.prank(s.keeper):
+        with boa.reverts("price guard"):
+            s.escrow.sell(week, amount, 1, now)
+        with boa.reverts("sale amount"):
+            s.escrow.sell(week + WEEK, amount, quote, now)
+        with boa.reverts("timing"):
+            s.escrow.sell(week, amount, quote, now - 1)
+        s.pool.configure(UNIT // 4, 9500)
+        with boa.reverts("slippage"):
+            s.escrow.sell(week, amount, quote * 99 // 100, now)
+    assert s.escrow.total_sold() == s.escrow.total_output() == 0
+    assert s.gauge.minted(s.receiver, s.gauge.address) == minted
 
 
-@pytest.mark.parametrize(
-    "kwargs,error",
-    [
-        ({"v": 25001 * U}, "budget"),
-        ({"v": 0}, "budget"),
-        ({"fee": 1}, "unused vm"),
-        ({"ml": ["0x" + "11" * 20]}, "unused vm"),
-        ({"v": 0, "vm": U, "cap": 100001, "fee": 1}, "vote cap"),
-        ({"v": 0, "vm": U, "cap": 1, "fee": 0}, "bridge fee"),
-        ({"v": 0, "vm": U, "cap": 1, "fee": 10**17 + 1}, "bridge fee"),
-    ],
-)
-def test_gates(system, kwargs, error):
-    with boa.reverts(error):
-        allocate(system, **kwargs)
+def test_output_rounding_is_cumulative(system):
+    s = system
+    begin(s)
+    for amount in [401, 405, 409]:
+        sale(s, amount)
+    row = s.escrow.weeks(s.start)
+    assert row.retained == row.output // 4
+    assert s.usd.balanceOf(s.receiver) + s.usd.balanceOf(s.escrow.address) == row.output
 
 
-def test_total_budget_cannot_be_recycled(system):
-    e, t, m, *_ = system
-    for n in range(4):
-        m.settings(135 + n, 50, False, False)
-        allocate(system, v=25000 * U)
-    t.mint(e.address, 10000 * U)
-    m.settings(139, 50, False, False)
-    with boa.reverts("budget"):
-        allocate(system)
+def test_no_funded_weeks_means_no_entitlement(system):
+    s = system
+    with boa.env.prank(s.manager):
+        s.escrow.activate()
+    advance(s.start + WEEK + 100)
+    assert s.escrow.checkpoint() == 0
+    assert s.escrow.next_sale() == (0, 0)
 
 
-def test_refund_goes_to_escrow_only(system):
-    e, t, m, treasury, manager, *_ = system
-    allocate(system)
-    before = t.balanceOf(e.address)
-    with boa.env.prank(manager):
-        e.withdrawUnprocessedVotium(135, U)
-    assert t.balanceOf(e.address) == before + U and t.balanceOf(manager) == 0
+def test_manager_can_recover_nonreturning_token_but_keeper_cannot(system):
+    s = system
+    token = boa.loads("""
+# pragma version ==0.4.3
+balanceOf: public(HashMap[address, uint256])
+@external
+def mint(to: address, amount: uint256):
+    self.balanceOf[to] += amount
+@external
+def transfer(to: address, amount: uint256):
+    self.balanceOf[msg.sender] -= amount
+    self.balanceOf[to] += amount
+""")
+    token.mint(s.escrow.address, 123)
+    with boa.env.prank(s.keeper), boa.reverts("manager"):
+        s.escrow.recover(token.address, 123)
+    with boa.env.prank(s.manager):
+        s.escrow.set_paused(True)
+        s.escrow.recover(token.address, 123)
+    assert token.balanceOf(s.manager) == 123
 
 
-def test_killed_gauge_cannot_receive_new_incentives(system):
-    e, t, m, *_ = system
-    m.settings(135, 50, True, False)
-    with boa.reverts("gauge killed"):
-        allocate(system)
-    assert e.allocated() == 0
+def test_unquotable_crv_dust_cannot_block_later_weeks(system):
+    s = system
+    begin(s, 2)
+    amount = s.escrow.next_sale()[1]
+    sale(s, amount - 1)
+    assert s.escrow.next_sale() == (0, 0)
+    advance(s.start + WEEK + 3600)
+    s.escrow.checkpoint()
+    # Finish the now-closed first week, deliberately leaving one wei.
+    while s.escrow.next_sale()[0] == s.start:
+        amount = s.escrow.next_sale()[1]
+        outstanding = s.escrow.weeks(s.start).earned - s.escrow.weeks(s.start).sold
+        sale(s, amount - 1 if amount == outstanding else amount)
+    assert s.escrow.next_sale()[0] == s.start + WEEK
+    assert s.escrow.weeks(s.start).earned - s.escrow.weeks(s.start).sold == 1

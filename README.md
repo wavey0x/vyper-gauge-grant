@@ -1,80 +1,68 @@
-# Vyper grant funding
+# Vyper funding
 
-Yearn's 100,000 USDC escrow for the renewed Vyper fundraising gauge. The management Safe allocates to Votium and VoteMarket once per Votium round; the treasury (`ychad.eth`) can recall unallocated USDC. No live deployment or keys are in this repository.
+Two Vyper contracts on Ethereum. No vote marketplace, bridge, router or frontend build.
 
-## Contract
+- **FundingEscrow** holds **yvUSDC-1** shares. The manager purchases a future emission week by withdrawing an exact USDC amount to a fixed OTC recipient. Each week can be paid once; lifetime spending cannot exceed **100,000 USDC**. Yield and recovered funds never reset that counter.
+- **ProceedsEscrow** sells funded-week CRV through the fixed CRV/crvUSD pool. It keeps Yearn's share as **crvUSD** and returns the other share to Vyper in the same transaction. A weekly ledger preserves the earning week through delayed minting and sales.
 
-`contracts/VyperFundingEscrow.vy`
+Both contracts are managed by `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. Keepers can sell; only the manager changes permissions or limits and recovers tokens to that multisig. There is no arbitrary execution or upgrade mechanism.
 
-- Every destination is immutable: USDC, gauge, Votium, the VoteMarket remote and platform, and the campaign manager.
-- `allocate(votium, vote_market, max_reward_per_vote, votium_exclusions, vote_market_exclusions)`: management only, at most one per Votium round, at most 25,000 USDC per round and 100,000 USDC in total. Exclusion lists must be sorted and unique (at most 50). VoteMarket caps reward per vote and the bridge fee at 0.1 ETH.
-- Votium and the remote get max USDC approval at deployment. Each allocation checks that the escrow balance fell by exactly the allocated amount.
-- `withdrawUnprocessedVotium`: Votium refunds return to the escrow.
-- `recallUSDC` / `recallETH`: treasury only.
-- No upgrades, pause or arbitrary calls.
+The dashboard has two balances and one weekly settlement table. Open [the illustrative report](dashboard/demo/index.html), or see [the preview](dashboard/preview.png).
 
-VoteMarket v2's Curve market exists only on Arbitrum. Allocations are sent on Ethereum, and the remote bridges each campaign over LaPoste to Arbitrum (`42161`). Voters claim there, and unused rewards are refunded there to the campaign manager as LaPoste-wrapped USDC.
-
-## Setup
+## Local checks
 
 ```sh
 uv sync --extra dev
-uv run vyper-grant build
-uv run pytest
+uv run --no-sync vyper-grant --out build build
+uv run --no-sync pytest
+RUN_FORK_TESTS=1 uv run --no-sync pytest tests/test_fork.py
 ```
 
-Fork tests use `ETHEREUM_RPC_URL` and `ARBITRUM_RPC_URL`, pinned to Ethereum block 26,336,208 and Arbitrum block 520,958,459:
+The fork test uses `ETHEREUM_RPC_URL` and never submits live transactions. See [verification](docs/verification.md) and [accounting](docs/accounting.md).
+
+## Deploy and configure
+
+Copy `config/example.json` to `config/live.json`. Set the agreed OTC **payee**, a future Thursday 00:00 UTC **start** timestamp, the programme duration (1–52 weeks), and a dedicated keeper address. The payee is deliberately unset: it must be the agreed yCRV OTC payment recipient, not Vyper or TheDAO by assumption. Production token, vault, gauge, pool, voter and manager addresses are fixed in the tooling.
 
 ```sh
-anvil --fork-url "$ETHEREUM_RPC_URL" --fork-block-number 26336208 --port 8547 &
-anvil --fork-url "$ARBITRUM_RPC_URL" --fork-block-number 520958459 --chain-id 42161 --port 8548 &
-RUN_FORK_TESTS=1 OPS_FORK_RPC=http://127.0.0.1:8547 OPS_ARB_FORK_RPC=http://127.0.0.1:8548 uv run pytest
+uv run vyper-grant deploy funding --deployer YOUR_ADDRESS
+# Submit the unsigned deployment through your signer; record funding and deployment_block.
+uv run vyper-grant deploy proceeds --deployer YOUR_ADDRESS
+# Record proceeds, then verify both deployments:
+uv run vyper-grant doctor
+uv run vyper-grant setup --allowance-crv AGREED_CRV_ALLOWANCE
 ```
 
-ABIs are vendored from verified deployments, and their provenance is in `abi/sources.json`.
+Deploy commands only prepare unsigned transactions. Setup writes two Safe batches. Vyper executes its CRV allowance and conditional mint authorization first; the manager then sets sale limits, enables the keeper, and activates before the first earning week. Activation claims legacy emissions into Vyper's wallet and excludes them from the programme.
 
-## Operations
+Fund the funding contract by transferring yvUSDC-1 shares. The vault is `0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204`; `previewWithdraw(100000000000)` gives the shares needed for approximately 100,000 USDC at the current price. Recheck at funding time. Raw USDC sent to the contract is recoverable, but is not automatically invested or spent. Vault losses or unavailable withdrawal liquidity stop purchases; withdrawals permit zero loss.
 
-Copy `config/example.json` to `config/live.json` (ignored by git) and set `management` and `campaign_manager` (which defaults to `management`). `max_reward_per_vote` is the hard ceiling in USDC base units per full veCRV vote.
-
-| Command | Output |
-| --- | --- |
-| `doctor` | Configuration blockers and the live Votium exclusion limit |
-| `deploy --deployer <eoa>` | Unsigned deployment transaction |
-| `plan-round --votium-usdc N --votemarket-usdc N --max-reward-per-vote N` | Reconciles, validates, quotes the bridge fee (+20%), simulates, then writes a Safe batch |
-| `campaign update\|close --id N` | Arbitrum Safe batch to settle periods or recover unused rewards |
-| `reconcile` | `output/report.json` rebuilt from finalized chain data |
-| `report` | Static dashboard in `dashboard/dist` |
-
-After deploying, set `escrow`, `deployment_block` and `arb_scan_from_block` in the config.
-
-Exclusions live in the config: Votium lists pro bono vlCVX voters, and VoteMarket lists pro bono veCRV voters. VoteMarket must always include `addresses.convex_voter`. Votium's `maxExclusions()` is currently zero, so a nonempty Votium list needs its owner to raise the limit.
-
-`ops/hourly.sh` runs `reconcile` and `report`. `plan-round` refuses to plan when reconciliation holds, meaning one of the following:
-
-- A VoteMarket delivery is missing.
-- Weekly evidence is missing.
-- Confirmed value plus the pending upper bound could reach the target.
-
-Any broken invariant fails reconciliation outright.
-
-## Dashboard
-
-`dashboard/template.html` is a static page with the report embedded, and it has no backend. To regenerate the illustrative demo:
+## Weekly purchases and voting
 
 ```sh
-uv run vyper-grant report --input dashboard/demo/report.json --out dashboard/demo
+uv run vyper-grant purchase --week THURSDAY_TIMESTAMP --usdc 2000 --reference AGREEMENT_OR_RATE_REFERENCE
+uv run vyper-grant checkpoint-vote --week CURRENT_WEEK_TIMESTAMP
 ```
 
-## Accounting
+These commands simulate and prepare Safe batches. The reference string and its hash are included in the purchase batch. A purchase authorizes attribution for that week, assuming **all** of the designated Yearn voter's gauge weight was bought. It does not cast a Curve vote or verify the commercial price. Coordinate payment with the existing yCRV voting workflow; the escrow manager is not the voter governance address. Before replacing an active week's vote, execute `checkpoint-vote` first or include that call before the vote in the voting Safe's atomic batch. The checkpoint itself is permissionless.
 
-See [docs/accounting.md](docs/accounting.md). Every vote that is eligible for a Yearn-funded campaign after exclusions counts toward the target. Convex votes are converted into Curve gauge-weight units. Value counts only after Curve mints the CRV to Vyper's receiver.
+The manager decides when the grant's offchain conditions permit spending and when to stop purchases. The contract enforces the lifetime spending budget; it does not enforce grant milestones or treat crvUSD output as USDC expenditure.
 
-## Sources
+## Keeper and reports
 
-- [Vyper gauge proposal](https://gov.curve.finance/t/proposal-to-renew-vypers-vefunder-gauge/11160)
-- [Curve gauges](https://docs.curve.finance/developer/gauges/overview/)
-- [Chainlink historical prices](https://docs.chain.link/data-feeds/price-feeds/historical-data)
-- [Votium](https://etherscan.io/address/0x63942E31E98f1833A234077f47880A66136a2D1e#code)
-- [VoteMarket v2](https://github.com/stake-dao/votemarket-v2/blob/main/packages/votemarket/src/Votemarket.sol)
-- [Convex voting](https://github.com/convex-eth/voting)
+```sh
+uv run vyper-grant keeper                 # simulate one action
+uv run vyper-grant keeper --send          # uses KEEPER_PRIVATE_KEY
+uv run vyper-grant reconcile
+uv run vyper-grant --out dashboard/dist report
+```
+
+Schedule `ops/run.sh` every five minutes with `VYPER_GRANT_DIR` and `ETHEREUM_RPC_URL` set externally. Set `KEEPER_SEND=1` and `KEEPER_PRIVATE_KEY` only for the dedicated keeper. Nothing is scheduled by this repository. Each pass submits at most one transaction: checkpoint accounting, then sell on a subsequent pass. Already-booked CRV sells before new accounting. Small final-week remainders are settled even below the normal trade minimum.
+
+Keep accounting current: each checkpoint accepts at most 16 weeks of elapsed time. A longer gap stops new accrual rather than guessing its allocation. Capture the weekly voter snapshot before any revote even when trading is paused.
+
+The keeper uses a file lock and a signed-transaction journal under `output/keeper`. It persists before broadcasting, rebroadcasts the same transaction after an uncertain send, and waits for two confirmations before another nonce. Use one host and signer per keeper; an untracked pending nonce stops execution. It does not automatically increase fees or replace expired sales. Resolve a stuck transaction with the same nonce and reconcile its receipt before manually retiring its journal. Dashboard accounting uses finalized blocks, so it intentionally lags execution.
+
+`quote`, `checkpoint`, `limits`, `set-keeper --account ADDRESS [--disable]`, `set-paused true|false`, and `recover funding|proceeds --token ADDRESS --amount-raw INTEGER` provide the remaining operations. Manager commands produce unsigned Safe batches. `repair-week --week TIMESTAMP` prepares archival evidence and a manager recovery batch for a missed vote snapshot; see the trust boundary in [accounting](docs/accounting.md).
+
+Example limits are starting configuration, not calibrated production approval. Verify the OTC recipient, permissions, price tolerance and trade size, then perform a small sale before increasing limits. There is no live deployment recorded in this checkout.
