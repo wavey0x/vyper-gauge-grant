@@ -191,9 +191,7 @@ def test_final_tail_syncs_then_sells_below_normal_minimum(chain, tmp_path):
     s["tester"].time_travel(s["start"] + WEEK + 1)
     s["escrow"].functions.sync().transact()
     available = s["escrow"].functions.available().call()
-    s["escrow"].functions.sell(available - 10**18, 0, end).transact(
-        {"from": s["keeper"]}
-    )
+    s["escrow"].functions.sell(available - 10**18, 0).transact({"from": s["keeper"]})
     s["tester"].time_travel(end + 1)
     s["tester"].mine_block()
     result = run(s["client"], s["c"], directory=tmp_path)

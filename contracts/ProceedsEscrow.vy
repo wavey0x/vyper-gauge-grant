@@ -232,9 +232,8 @@ def quote(amount: uint256) -> uint256:
 
 @external
 @nonreentrant
-def sell(amount: uint256, min_out: uint256, deadline: uint256):
+def sell(amount: uint256, min_out: uint256):
     assert self.keepers[msg.sender] and not self.paused, "keeper or paused"
-    assert block.timestamp <= deadline, "expired"
     available: uint256 = self._sync()
     assert amount > 0 and amount <= available, "sale amount"
     self.available = available - amount

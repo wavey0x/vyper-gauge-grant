@@ -20,7 +20,7 @@ def sale(s, amount=None):
     amount = preview(s) if amount is None else amount
     quote = s.escrow.quote(amount)
     with boa.env.prank(s.keeper):
-        s.escrow.sell(amount, quote * 99 // 100, boa.env.evm.patch.timestamp + 120)
+        s.escrow.sell(amount, quote * 99 // 100)
     return amount, quote
 
 
@@ -97,7 +97,7 @@ def test_public_sync_captures_exact_boundary_and_works_while_paused(system):
         assert s.escrow.sync() > 0
     assert s.escrow.weeks(s.start).yearn == row.yearn
     with boa.env.prank(s.keeper), boa.reverts("keeper or paused"):
-        s.escrow.sell(1, 0, boa.env.evm.patch.timestamp)
+        s.escrow.sell(1, 0)
 
 
 def test_one_swap_consumes_two_weeks_with_different_ratios(system):
@@ -164,16 +164,13 @@ def test_failed_sale_rolls_back_sync_claim_and_all_transfers(system):
     cursor, accrued = s.escrow.cursor(), s.escrow.accrued()
     amount = preview(s)
     quote = s.escrow.quote(amount)
-    now = boa.env.evm.patch.timestamp
     with boa.env.prank(s.stranger), boa.reverts("keeper or paused"):
-        s.escrow.sell(amount, quote, now)
+        s.escrow.sell(amount, quote)
     with boa.env.prank(s.keeper):
         with boa.reverts("sale amount"):
-            s.escrow.sell(amount + 1, 0, now)
-        with boa.reverts("expired"):
-            s.escrow.sell(amount, quote, now - 1)
+            s.escrow.sell(amount + 1, 0)
         with boa.reverts("slippage"):
-            s.escrow.sell(amount, quote + 1, now)
+            s.escrow.sell(amount, quote + 1)
     assert s.escrow.cursor() == cursor and s.escrow.accrued() == accrued
     assert not s.escrow.weeks(s.start).ready
     assert s.escrow.available() == 0
@@ -188,7 +185,7 @@ def test_operator_minimum_is_the_only_price_policy(system):
     s.pool.configure(UNIT // 20, 10000)
     output = s.escrow.quote(amount)
     with boa.env.prank(s.keeper):
-        s.escrow.sell(amount, output, boa.env.evm.patch.timestamp)
+        s.escrow.sell(amount, output)
     assert s.usd.balanceOf(s.escrow.address) == output // 4
 
 

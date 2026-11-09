@@ -127,7 +127,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         quote = escrow.quote(amount)
         before = usd.balanceOf(A["receiver"])
         with boa.env.prank(keeper):
-            escrow.sell(amount, quote * 995 // 1000, boa.env.evm.patch.timestamp + 300)
+            escrow.sell(amount, quote * 995 // 1000)
         assert escrow.available() == 0
         assert usd.balanceOf(escrow.address) == quote * first.yearn // first.total
         assert (
@@ -176,7 +176,6 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
                         escrow.sell(
                             10**18,
                             quote * 995 // 1000,
-                            boa.env.evm.patch.timestamp + 300,
                         )
                     break
             assert reached

@@ -48,7 +48,7 @@ def run(client, c, send=False, directory="output/keeper", sync_only=False):
             minimum = read(f.quote(amount)) * (10000 - c["slippage_bps"]) // 10000
             if minimum == 0:
                 return {"status": "below pool precision"}
-            fn = f.sell(amount, minimum, now + 300)
+            fn = f.sell(amount, minimum)
             action = {"status": "sale", "crv": str(amount), "min_crvusd": str(minimum)}
         elif not (sync_only or boundary_due):
             if not authorized:

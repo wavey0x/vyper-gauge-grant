@@ -3,9 +3,9 @@
 Two Vyper contracts on Ethereum, with one normal sale transaction.
 
 - **FundingEscrow** holds yvUSDC-1 and pays exact USDC amounts to a fixed OTC recipient for future emission weeks. Lifetime spending cannot exceed **100,000 USDC**; yield and recovery never reset the budget.
-- **ProceedsEscrow** automatically syncs earning-week accounting inside `sell(amount, min_out, deadline)`. It sells through the fixed CRV/crvUSD pool, retains Yearn's share as **crvUSD**, and returns Vyper's share atomically. A sale can consume CRV from several weeks, each with its own frozen ratio.
+- **ProceedsEscrow** automatically syncs earning-week accounting inside `sell(amount, min_out)`. It sells through the fixed CRV/crvUSD pool, retains Yearn's share as **crvUSD**, and returns Vyper's share atomically. A sale can consume CRV from several weeks, each with its own frozen ratio.
 
-The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It controls keeper permissions, pauses sales, and can recover any ERC20 to itself. Public `sync()` remains usable while paused. The operator sets trade size, cadence, slippage and deadline; the pool enforces `min_out`. There is no additional oracle or onchain trade policy.
+The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It controls keeper permissions, pauses sales, and can recover any ERC20 to itself. Public `sync()` remains usable while paused. The operator sets trade size, cadence and slippage; the pool enforces `min_out`. There is no additional oracle or onchain trade policy.
 
 The dashboard has two balances and one weekly table: [illustrative report](dashboard/demo/index.html), [preview](dashboard/preview.png). See [accounting](docs/accounting.md) and [verification](docs/verification.md).
 
