@@ -1,88 +1,99 @@
 """Exercise the real Python workflow against deployed contracts on an in-memory EVM."""
 
 import json
-from functools import lru_cache
+import boa
 import pytest
-from eth_tester import EthereumTester
+from eth_tester import EthereumTester, PyEVMBackend
+from eth.vm.spoof import SpoofTransaction
 from web3 import Web3, EthereumTesterProvider
-from vyper import compile_code
+from conftest import deploy_mocks
 from vyper_grant.core import ADDRESSES, ROOT, WEEK, artifact
 from vyper_grant.chain import verify, report, historical_vote
-from vyper_grant.cli import setup, doctor
+from vyper_grant.cli import setup, doctor, deployment
 from vyper_grant.keeper import run
-
-
-@lru_cache
-def mock_artifact(name):
-    return compile_code(
-        (ROOT / "tests/mocks" / f"{name}.vy").read_text(),
-        output_formats=["abi", "bytecode"],
-    )
 
 
 @pytest.fixture
 def chain(monkeypatch):
-    tester = EthereumTester()
-    client = Web3(EthereumTesterProvider(tester))
-    deployer, manager, receiver, voter, keeper, payee = client.eth.accounts[:6]
-    client.eth.default_account = deployer
-
-    def deploy(compiled, *args):
-        factory = client.eth.contract(
-            abi=compiled["abi"], bytecode=compiled["bytecode"]
+    # Seed dependencies at their fixed addresses without editing escrow bytecode.
+    mocks = deploy_mocks()
+    genesis = PyEVMBackend.generate_genesis_state()
+    for mock in mocks.values():
+        layout = mock.compiler_data.storage_layout["storage_layout"].values()
+        slots = (
+            slot
+            for field in layout
+            for slot in range(field["slot"], field["slot"] + field["n_slots"])
         )
-        receipt = client.eth.wait_for_transaction_receipt(
-            factory.constructor(*args).transact()
+        genesis[bytes.fromhex(str(mock.address)[2:])] = dict(
+            balance=0,
+            nonce=1,
+            code=boa.env.get_code(mock.address),
+            storage={slot: boa.env.get_storage(mock.address, slot) for slot in slots},
         )
-        return client.eth.contract(address=receipt.contractAddress, abi=compiled["abi"])
-
-    usdc, crv, usd = [deploy(mock_artifact("Token")) for _ in range(3)]
-    vault = deploy(mock_artifact("Vault"), usdc.address)
-    gauge = deploy(mock_artifact("System"), crv.address, receiver)
-    pool = deploy(mock_artifact("Pool"), crv.address, usd.address)
-    start = (client.eth.get_block("latest").timestamp // WEEK + 1) * WEEK
-    funding = deploy(artifact("funding"), vault.address, manager, payee, start, 4)
-    escrow = deploy(
-        artifact("proceeds"),
-        funding.address,
-        crv.address,
-        usd.address,
-        gauge.address,
-        gauge.address,
-        gauge.address,
-        voter,
-        pool.address,
+    manager, receiver, voter = [ADDRESSES[k] for k in ["manager", "receiver", "voter"]]
+    for account in [manager, receiver]:
+        genesis[bytes.fromhex(account[2:])] = dict(
+            balance=10**24, nonce=0, code=b"", storage={}
+        )
+    backend = PyEVMBackend(
+        genesis_state=genesis,
+        genesis_parameters={
+            "timestamp": boa.env.evm.patch.timestamp,
+            "gas_limit": 30_000_000,
+        },
     )
+    tester = EthereumTester(backend)
+    client = Web3(EthereumTesterProvider(tester))
+    monkeypatch.setattr(type(client.eth), "chain_id", property(lambda _: 1))
+    deployer, keeper, payee = [client.eth.accounts[i] for i in [0, 4, 5]]
+    client.eth.default_account = deployer
+    original_sign = backend._get_normalized_and_signed_evm_transaction
+
+    def sign(transaction, block_number="latest"):
+        if transaction["from"] in [bytes.fromhex(a[2:]) for a in [manager, receiver]]:
+            unsigned = backend._get_normalized_and_unsigned_evm_transaction(
+                transaction, block_number
+            )
+            return SpoofTransaction(
+                unsigned.as_signed_transaction(backend.account_keys[0]),
+                sender=transaction["from"],
+            )
+        return original_sign(transaction, block_number)
+
+    monkeypatch.setattr(backend, "_get_normalized_and_signed_evm_transaction", sign)
+
+    def deploy(name):
+        prepared = deployment(client, c, name, deployer)
+        receipt = client.eth.wait_for_transaction_receipt(
+            client.eth.send_transaction(prepared["transaction"])
+        )
+        c[name] = receipt.contractAddress
+        return client.eth.contract(
+            address=receipt.contractAddress, abi=artifact(name)["abi"]
+        )
+
+    usdc, crv, usd, vault, gauge, controller, minter, pool = [
+        client.eth.contract(address=str(mock.address), abi=mock.abi)
+        for mock in mocks.values()
+    ]
+    start = (client.eth.get_block("latest").timestamp // WEEK + 1) * WEEK
     c = json.loads((ROOT / "config/example.json").read_text())
     c.update(
-        funding=funding.address,
-        proceeds=escrow.address,
         payee=payee,
         start=start,
         weeks=4,
         keeper=keeper,
         deployment_block=1,
     )
-    for key, val in dict(
-        manager=manager,
-        usdc=usdc.address,
-        vault=vault.address,
-        crv=crv.address,
-        crvusd=usd.address,
-        gauge=gauge.address,
-        receiver=receiver,
-        voter=voter,
-        controller=gauge.address,
-        minter=gauge.address,
-        pool=pool.address,
-    ).items():
-        monkeypatch.setitem(ADDRESSES, key, val)
+    funding = deploy("funding")
+    escrow = deploy("proceeds")
     usdc.functions.mint(manager, 100_000 * 10**6).transact()
     usdc.functions.approve(vault.address, 100_000 * 10**6).transact({"from": manager})
     vault.functions.deposit(100_000 * 10**6, funding.address).transact(
         {"from": manager}
     )
-    gauge.functions.toggle_approve_mint(escrow.address).transact({"from": receiver})
+    minter.functions.toggle_approve_mint(escrow.address).transact({"from": receiver})
     crv.functions.approve(escrow.address, 10**30).transact({"from": receiver})
     escrow.functions.set_keeper(keeper, True).transact({"from": manager})
     for w in range(start - WEEK, start + 5 * WEEK, WEEK):
@@ -206,7 +217,6 @@ def test_uncertain_broadcast_uses_chain_state_on_next_pass(
 ):
     s = chain
     begin(s)
-    monkeypatch.setattr(type(s["client"].eth), "chain_id", property(lambda _: 1))
     monkeypatch.setenv(
         "KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex()
     )

@@ -35,7 +35,7 @@ Catch-up is bounded to 16 weeks. A final sync crossing programme end closes accr
 
 ## Sale settlement
 
-The operator chooses amount and `min_out`. Only approved keepers may sell, through the immutable pool `0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14`, CRV index 2 to crvUSD index 0. There is no oracle floor, trade-size policy or cooldown in the contract.
+The operator chooses amount and `min_out`. Only approved keepers may sell, through the fixed pool `0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14`, CRV index 2 to crvUSD index 0. There is no oracle floor, trade-size policy or cooldown in the contract.
 
 `sell()` syncs first and checks the exact requested amount against available inventory. It claims when necessary, pulls CRV from Vyper and measures the swap's crvUSD balance delta. Old escrow balances never enter the split.
 

@@ -59,12 +59,11 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             },
         ]
         ctrl = boa.loads_abi(json.dumps(ctrl_abi)).at(A["controller"])
-        voter, keeper, payee = [boa.env.generate_address() for _ in range(3)]
+        voter = A["voter"]
+        keeper, payee = [boa.env.generate_address() for _ in range(2)]
         start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK
         funding = boa.load(
             str(ROOT / "contracts/FundingEscrow.vy"),
-            A["vault"],
-            A["manager"],
             payee,
             start,
             52,
@@ -72,13 +71,6 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         escrow = boa.load(
             str(ROOT / "contracts/ProceedsEscrow.vy"),
             funding.address,
-            A["crv"],
-            A["crvusd"],
-            A["gauge"],
-            A["controller"],
-            A["minter"],
-            voter,
-            A["pool"],
         )
         holder = "0x55FE002aefF02F77364de339a1292923A15844B8"
         with boa.env.prank(holder):
@@ -87,30 +79,17 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         assert funding.assets() >= 100_000 * 10**6 - 1
         with boa.env.prank(A["receiver"]):
             minter.mint(A["gauge"])
-            crv.transfer(voter, 1000 * 10**18)
             crv.approve(escrow.address, 10**27)
             if not minter.allowed_to_mint_for(escrow.address, A["receiver"]):
                 minter.toggle_approve_mint(escrow.address)
-        ve_abi = [
-            {
-                "name": "create_lock",
-                "type": "function",
-                "stateMutability": "nonpayable",
-                "inputs": [
-                    {"name": "value", "type": "uint256"},
-                    {"name": "unlock_time", "type": "uint256"},
-                ],
-                "outputs": [],
-            }
-        ]
-        ve = boa.loads_abi(json.dumps(ve_abi)).at(
-            "0x5f3b5DfEb7B28CDbD7FAba78963EE202a494e2A2"
-        )
+        # Reassign an existing Yearn vote on this pinned fork. No substitute voter.
+        previous_gauge = "0x05255C5BD33672b9FEA4129C13274D1E6193312d"
+        power = ctrl.vote_user_slopes(voter, previous_gauge)[1]
+        assert power > 0
         voted_at = boa.env.evm.patch.timestamp
         with boa.env.prank(voter):
-            crv.approve(ve.address, 1000 * 10**18)
-            ve.create_lock(1000 * 10**18, voted_at + 4 * 365 * 86400)
-            ctrl.vote_for_gauge_weights(A["gauge"], 10000)
+            ctrl.vote_for_gauge_weights(previous_gauge, 0)
+            ctrl.vote_for_gauge_weights(A["gauge"], power)
         with boa.env.prank(A["manager"]):
             for i in range(52):
                 funding.purchase(start + i * WEEK, 1000 * 10**6)

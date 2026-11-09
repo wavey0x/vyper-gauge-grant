@@ -1,7 +1,4 @@
 # pragma version ==0.4.3
-interface Token:
-    def mint(account: address, amount: uint256): nonpayable
-
 struct Point:
     bias: uint256
     slope: uint256
@@ -11,14 +8,11 @@ struct Vote:
     end: uint256
 
 receiver: public(address)
-token: address
 points_weight: public(HashMap[address, HashMap[uint256, Point]])
 gauge_relative_weight: public(HashMap[address, HashMap[uint256, uint256]])
 vote_user_slopes: public(HashMap[address, HashMap[address, Vote]])
 last_user_vote: public(HashMap[address, HashMap[address, uint256]])
 integrate_fraction: public(HashMap[address, uint256])
-minted: public(HashMap[address, HashMap[address, uint256]])
-allowed_to_mint_for: public(HashMap[address, HashMap[address, bool]])
 max_emissions: public(uint256)
 inflation_rate: public(uint256)
 future_epoch_time: public(uint256)
@@ -26,8 +20,7 @@ killed: bool
 last_checkpoint: public(uint256)
 
 @deploy
-def __init__(token: address, receiver: address):
-    self.token = token
+def __init__(receiver: address):
     self.receiver = receiver
     self.max_emissions = 2_000_000 * 10**18
     self.inflation_rate = 10**18 + 111
@@ -89,18 +82,6 @@ def _checkpoint():
 def user_checkpoint(account: address) -> bool:
     self._checkpoint()
     return True
-
-@external
-def toggle_approve_mint(delegate: address):
-    self.allowed_to_mint_for[delegate][msg.sender] = not self.allowed_to_mint_for[delegate][msg.sender]
-
-@external
-def mint_for(gauge: address, account: address):
-    if self.allowed_to_mint_for[msg.sender][account]:
-        self._checkpoint()
-        amount: uint256 = self.integrate_fraction[account] - self.minted[account][gauge]
-        self.minted[account][gauge] += amount
-        extcall Token(self.token).mint(account, amount)
 
 @external
 @view

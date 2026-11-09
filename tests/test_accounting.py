@@ -100,9 +100,9 @@ def test_third_party_claims_and_partial_sales_do_not_duplicate_earnings(system):
     s = system
     begin(s)
     with boa.env.prank(s.receiver):
-        s.gauge.toggle_approve_mint(s.stranger)
+        s.minter.toggle_approve_mint(s.stranger)
     with boa.env.prank(s.stranger):
-        s.gauge.mint_for(s.gauge.address, s.receiver)
+        s.minter.mint_for(s.gauge.address, s.receiver)
     advance(s.start + 7200)
     s.escrow.sync()
     sale(s, 10 * UNIT)
@@ -114,12 +114,12 @@ def test_third_party_claims_and_partial_sales_do_not_duplicate_earnings(system):
 def test_return_transfer_failure_rolls_back_claim_pull_and_swap(system):
     s = system
     begin(s)
-    minted = s.gauge.minted(s.receiver, s.gauge.address)
+    minted = s.minter.minted(s.receiver, s.gauge.address)
     balance = s.crv.balanceOf(s.receiver)
     s.usd.reject(s.receiver)
     with boa.reverts("recipient rejected"):
         sale(s)
-    assert s.gauge.minted(s.receiver, s.gauge.address) == minted
+    assert s.minter.minted(s.receiver, s.gauge.address) == minted
     assert s.crv.balanceOf(s.receiver) == balance
     assert s.usd.balanceOf(s.escrow.address) == 0
 
@@ -172,11 +172,11 @@ def test_missing_mint_permission_and_revoked_keeper(system):
     s = system
     begin(s)
     with boa.env.prank(s.receiver):
-        s.gauge.toggle_approve_mint(s.escrow.address)
+        s.minter.toggle_approve_mint(s.escrow.address)
     with boa.reverts("mint permission"):
         sale(s)
     with boa.env.prank(s.receiver):
-        s.gauge.toggle_approve_mint(s.escrow.address)
+        s.minter.toggle_approve_mint(s.escrow.address)
     with boa.env.prank(s.manager):
         s.escrow.set_keeper(s.keeper, False)
     with boa.reverts("keeper or paused"):
@@ -190,8 +190,6 @@ def test_maximum_catchup_fits_transaction_gas(system):
 
     funding = boa.load(
         str(ROOT / "contracts/FundingEscrow.vy"),
-        s.vault.address,
-        s.manager,
         s.payee,
         s.start,
         52,
@@ -199,13 +197,6 @@ def test_maximum_catchup_fits_transaction_gas(system):
     escrow = boa.load(
         str(ROOT / "contracts/ProceedsEscrow.vy"),
         funding.address,
-        s.crv.address,
-        s.usd.address,
-        s.gauge.address,
-        s.gauge.address,
-        s.gauge.address,
-        s.voter,
-        s.pool.address,
     )
     s.usdc.mint(s.manager, 100_000 * 10**6)
     with boa.env.prank(s.manager):
@@ -214,7 +205,7 @@ def test_maximum_catchup_fits_transaction_gas(system):
         for i in range(52):
             funding.purchase(s.start + i * WEEK, 10**6)
     with boa.env.prank(s.receiver):
-        s.gauge.toggle_approve_mint(escrow.address)
+        s.minter.toggle_approve_mint(escrow.address)
     for w in range(s.start - WEEK, s.start + 65 * WEEK, WEEK):
         s.gauge.set_weight(w, 4 * max(0, s.start + 52 * WEEK - w) * 10**12, 10**16 + 17)
     gas = 0

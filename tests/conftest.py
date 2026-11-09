@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import boa
 import pytest
+from vyper_grant.core import ADDRESSES as A
 
 ROOT = Path(__file__).resolve().parents[1]
 WEEK = 604800
@@ -24,20 +25,34 @@ def advance(timestamp):
     boa.env.time_travel(seconds=timestamp - boa.env.evm.patch.timestamp)
 
 
+def deploy_mocks():
+    """Install dependencies at mainnet addresses; escrow source stays unchanged."""
+
+    def load(name, key, *args):
+        return boa.load(
+            str(ROOT / "tests/mocks" / f"{name}.vy"), *args, override_address=A[key]
+        )
+
+    return dict(
+        usdc=load("Token", "usdc"),
+        crv=load("Token", "crv"),
+        usd=load("Token", "crvusd"),
+        vault=load("Vault", "vault", A["usdc"]),
+        gauge=load("System", "gauge", A["receiver"]),
+        controller=load("Controller", "controller", A["gauge"]),
+        minter=load("Minter", "minter", A["crv"]),
+        pool=load("Pool", "pool", A["crv"], A["crvusd"]),
+    )
+
+
 @pytest.fixture
 def system():
-    load = lambda name, *args: boa.load(str(ROOT / name), *args)
-    manager, receiver, payee, voter, keeper, stranger = [
-        boa.env.generate_address() for _ in range(6)
-    ]
-    usdc, crv, usd = [load("tests/mocks/Token.vy") for _ in range(3)]
-    vault = load("tests/mocks/Vault.vy", usdc.address)
-    gauge = load("tests/mocks/System.vy", crv.address, receiver)
-    pool = load("tests/mocks/Pool.vy", crv.address, usd.address)
+    manager, receiver, voter = A["manager"], A["receiver"], A["voter"]
+    payee, keeper, stranger = [boa.env.generate_address() for _ in range(3)]
+    mocks = deploy_mocks()
+    usdc, crv, usd, vault, gauge, controller, minter, pool = mocks.values()
     start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK
-    funding = load(
-        "contracts/FundingEscrow.vy", vault.address, manager, payee, start, 8
-    )
+    funding = boa.load(str(ROOT / "contracts/FundingEscrow.vy"), payee, start, 8)
     usdc.mint(manager, 100_000 * 10**6)
     with boa.env.prank(manager):
         usdc.approve(vault.address, 100_000 * 10**6)
@@ -54,16 +69,9 @@ def deploy_proceeds(s):
     s.escrow = boa.load(
         str(ROOT / "contracts/ProceedsEscrow.vy"),
         s.funding.address,
-        s.crv.address,
-        s.usd.address,
-        s.gauge.address,
-        s.gauge.address,
-        s.gauge.address,
-        s.voter,
-        s.pool.address,
     )
     with boa.env.prank(s.manager):
         s.escrow.set_keeper(s.keeper, True)
     with boa.env.prank(s.receiver):
         s.crv.approve(s.escrow.address, 2_000_000 * UNIT)
-        s.gauge.toggle_approve_mint(s.escrow.address)
+        s.minter.toggle_approve_mint(s.escrow.address)

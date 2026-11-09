@@ -9,7 +9,6 @@ interface Token:
     def transferFrom(owner: address, to: address, amount: uint256) -> bool: nonpayable
 
 interface Funding:
-    def MANAGER() -> address: view
     def START() -> uint256: view
     def END() -> uint256: view
     def paid(week: uint256) -> uint256: view
@@ -35,7 +34,6 @@ interface Minter:
     def mint_for(gauge: address, account: address): nonpayable
 
 interface Pool:
-    def coins(index: uint256) -> address: view
     def get_dy(i: uint256, j: uint256, amount: uint256) -> uint256: view
     def exchange(i: uint256, j: uint256, amount: uint256, min_out: uint256) -> uint256: nonpayable
 
@@ -73,18 +71,18 @@ event Recovered:
 
 WEEK: constant(uint256) = 604800
 YEAR: constant(uint256) = 365 * 86400
+MANAGER: public(constant(address)) = 0x4444AAAACDBa5580282365e25b16309Bd770ce4a
+CRV: public(constant(address)) = 0xD533a949740bb3306d119CC777fa900bA034cd52
+CRVUSD: public(constant(address)) = 0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E
+GAUGE: public(constant(address)) = 0x3b8EFAa0A1Fca3d31144002f6D9c7412B967E0b4
+CONTROLLER: public(constant(address)) = 0x2F50D538606Fa9EDD2B11E2446BEb18C9D5846bB
+MINTER: public(constant(address)) = 0xd061D61a4d941c39E5453435B6345Dc261C2fcE0
+VOTER: public(constant(address)) = 0xF147b8125d2ef93FB6965Db97D6746952a133934
+POOL: public(constant(address)) = 0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14
 FUNDING: public(immutable(address))
-MANAGER: public(immutable(address))
 START: public(immutable(uint256))
 END: public(immutable(uint256))
-CRV: public(immutable(address))
-CRVUSD: public(immutable(address))
-GAUGE: public(immutable(address))
-CONTROLLER: public(immutable(address))
-MINTER: public(immutable(address))
-VOTER: public(immutable(address))
 RECEIVER: public(immutable(address))
-POOL: public(immutable(address))
 CAP: public(immutable(uint256))
 
 weeks: public(HashMap[uint256, Week])
@@ -98,30 +96,21 @@ rate: uint256
 rate_epoch: uint256
 
 @deploy
-def __init__(funding: address, crv: address, crvusd: address, gauge: address, controller: address, minter: address, voter: address, pool: address):
+def __init__(funding: address):
     FUNDING = funding
-    MANAGER = staticcall Funding(funding).MANAGER()
     START = staticcall Funding(funding).START()
     END = staticcall Funding(funding).END()
     assert block.timestamp < START, "start"
-    CRV = crv
-    CRVUSD = crvusd
-    GAUGE = gauge
-    CONTROLLER = controller
-    MINTER = minter
-    VOTER = voter
-    RECEIVER = staticcall Gauge(gauge).receiver()
-    POOL = pool
-    CAP = staticcall Gauge(gauge).max_emissions()
-    assert RECEIVER != empty(address) and voter != empty(address), "address"
-    assert staticcall Pool(pool).coins(2) == crv and staticcall Pool(pool).coins(0) == crvusd, "route"
-    assert extcall Token(crv).approve(pool, max_value(uint256)), "approve"
-    assert not staticcall Gauge(gauge).is_killed(), "gauge killed"
-    assert extcall Gauge(gauge).user_checkpoint(RECEIVER)
+    RECEIVER = staticcall Gauge(GAUGE).receiver()
+    CAP = staticcall Gauge(GAUGE).max_emissions()
+    assert RECEIVER != empty(address), "receiver"
+    assert extcall Token(CRV).approve(POOL, max_value(uint256)), "approve"
+    assert not staticcall Gauge(GAUGE).is_killed(), "gauge killed"
+    assert extcall Gauge(GAUGE).user_checkpoint(RECEIVER)
     self.cursor = block.timestamp
-    self.accrued = staticcall Gauge(gauge).integrate_fraction(RECEIVER)
-    self.rate = staticcall Gauge(gauge).inflation_rate()
-    self.rate_epoch = staticcall Gauge(gauge).future_epoch_time()
+    self.accrued = staticcall Gauge(GAUGE).integrate_fraction(RECEIVER)
+    self.rate = staticcall Gauge(GAUGE).inflation_rate()
+    self.rate_epoch = staticcall Gauge(GAUGE).future_epoch_time()
     assert self.rate_epoch >= block.timestamp, "rate epoch"
     self.sale_week = START
 

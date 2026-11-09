@@ -41,14 +41,11 @@ def batch(sender, *calls, **meta):
 def deployment(client, c, name, deployer):
     if not c.get("payee") or not c.get("start"):
         raise ValueError("Configure payee and start before deployment")
-    args = [A["vault"], A["manager"], c["payee"], c["start"], c["weeks"]]
+    args = [c["payee"], c["start"], c["weeks"]]
     if name == "proceeds":
         if not c.get("funding"):
             raise ValueError("Deploy and configure funding first")
-        args = [c["funding"]] + [
-            A[k]
-            for k in ["crv", "crvusd", "gauge", "controller", "minter", "voter", "pool"]
-        ]
+        args = [c["funding"]]
     compiled = artifact(name)
     factory = client.eth.contract(abi=compiled["abi"], bytecode=compiled["bytecode"])
     tx = factory.constructor(*args).build_transaction(

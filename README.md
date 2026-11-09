@@ -21,7 +21,7 @@ The build updates `abi/contracts.json` and unsigned deployment artifacts in `bui
 
 ## Deploy and fund
 
-Copy `config/example.json` to `config/live.json`. Set the agreed OTC **payee**, a future Thursday 00:00 UTC **start** timestamp, the programme duration (1–52 weeks), and a dedicated keeper address. The payee must be the agreed yCRV OTC recipient. Token, vault, gauge, voter, pool and manager addresses are fixed in the tooling.
+Copy `config/example.json` to `config/live.json`. Set the agreed OTC **payee**, a future Thursday 00:00 UTC **start** timestamp, the programme duration (1–52 weeks), and a dedicated keeper address. The payee must be the agreed yCRV OTC recipient. Token, vault, gauge, controller, minter, voter, pool and manager addresses are constants in the contracts. Constructors take only `FundingEscrow(payee, start, weeks)` and `ProceedsEscrow(funding)`. The proceeds escrow reads the schedule from funding and the receiver and emissions cap from the gauge.
 
 ```sh
 uv run vyper-grant deploy funding --deployer YOUR_ADDRESS

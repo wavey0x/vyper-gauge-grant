@@ -12,36 +12,21 @@ def verify(client, c, block="latest"):
     contracts = {n: contract(client, n, c.get(n)) for n in ["funding", "proceeds"]}
     expected = {
         "funding": {
-            "VAULT": ADDRESSES["vault"],
-            "USDC": ADDRESSES["usdc"],
-            "MANAGER": ADDRESSES["manager"],
             "PAYEE": c["payee"],
             "START": c["start"],
             "END": c["start"] + c["weeks"] * WEEK,
         },
         "proceeds": {
-            k.upper(): v
-            for k, v in ADDRESSES.items()
-            if k
-            in [
-                "manager",
-                "crv",
-                "crvusd",
-                "gauge",
-                "controller",
-                "minter",
-                "voter",
-                "receiver",
-                "pool",
-            ]
+            "FUNDING": c["funding"],
+            "START": c["start"],
+            "END": c["start"] + c["weeks"] * WEEK,
+            "RECEIVER": ADDRESSES["receiver"],
         },
     }
-    expected["proceeds"].update(
-        FUNDING=c["funding"], START=c["start"], END=expected["funding"]["END"]
-    )
     for name, instance in contracts.items():
         code = bytes(client.eth.get_code(instance.address, block_identifier=block))
         runtime = bytes.fromhex(artifact(name)["bytecode_runtime"][2:])
+        # Fixed addresses are embedded in the verified runtime.
         if not code.startswith(runtime):
             raise ValueError(f"Unexpected {name} bytecode")
         for getter, value in expected[name].items():

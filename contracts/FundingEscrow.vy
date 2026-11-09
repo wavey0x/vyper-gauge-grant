@@ -6,7 +6,6 @@ interface Token:
     def transfer(to: address, amount: uint256) -> bool: nonpayable
 
 interface Vault:
-    def asset() -> address: view
     def convertToAssets(shares: uint256) -> uint256: view
     def withdraw(assets: uint256, receiver: address, owner: address, max_loss: uint256) -> uint256: nonpayable
 
@@ -21,9 +20,9 @@ event Recovered:
 
 WEEK: constant(uint256) = 604800
 BUDGET: public(constant(uint256)) = 100_000 * 10**6
-VAULT: public(immutable(address))
-USDC: public(immutable(address))
-MANAGER: public(immutable(address))
+VAULT: public(constant(address)) = 0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204
+USDC: public(constant(address)) = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+MANAGER: public(constant(address)) = 0x4444AAAACDBa5580282365e25b16309Bd770ce4a
 PAYEE: public(immutable(address))
 START: public(immutable(uint256))
 END: public(immutable(uint256))
@@ -31,13 +30,10 @@ spent: public(uint256)
 paid: public(HashMap[uint256, uint256])
 
 @deploy
-def __init__(vault: address, manager: address, payee: address, start: uint256, weeks: uint256):
-    assert manager != empty(address) and payee != empty(address), "address"
+def __init__(payee: address, start: uint256, weeks: uint256):
+    assert payee != empty(address), "address"
     assert start > block.timestamp and start % WEEK == 0, "start"
     assert weeks > 0 and weeks <= 52, "duration"
-    VAULT = vault
-    USDC = staticcall Vault(vault).asset()
-    MANAGER = manager
     PAYEE = payee
     START = start
     END = start + weeks * WEEK
