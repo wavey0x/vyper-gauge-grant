@@ -15,28 +15,25 @@
       "week": "1792627200",
       "paid": "4000000000",
       "ready": true,
-      "yearn": "3",
-      "total": "5",
       "retained": "5300000000000000000000",
-      "status": "Settled"
+      "status": "Closed",
+      "share": "600000000000000000"
     },
     {
       "week": "1793232000",
       "paid": "4000000000",
       "ready": true,
-      "yearn": "3",
-      "total": "5",
       "retained": "6100000000000000000000",
-      "status": "Settled"
+      "status": "Closed",
+      "share": "600000000000000000"
     },
     {
       "week": "1793836800",
       "paid": "4000000000",
       "ready": true,
-      "yearn": "3",
-      "total": "5",
       "retained": "4200000000000000000000",
-      "status": "Earning"
+      "status": "Active",
+      "share": "600000000000000000"
     }
   ],
   "warnings": []

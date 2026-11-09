@@ -1,5 +1,6 @@
 #!/bin/sh
-# Schedule every five minutes. Sending is opt-in; credentials stay in the environment.
+# Run every five minutes, including the closing window before Thursday 00:00 UTC.
+# Optional argument: checkpoint (snapshot only). Sending is opt-in.
 set -eu
 cd "${VYPER_GRANT_DIR:?Set VYPER_GRANT_DIR}"
 keeper_status=0

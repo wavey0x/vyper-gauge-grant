@@ -108,6 +108,8 @@ def begin(s):
     s["funding"].functions.purchase(s["start"], 1000 * 10**6).transact(
         {"from": s["manager"]}
     )
+    s["tester"].time_travel(s["start"] - 180)
+    s["escrow"].functions.sell(0).transact({"from": s["keeper"]})
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
 
@@ -135,9 +137,7 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     begin(s)
     result = run(s["client"], s["c"], directory=tmp_path)
     assert result["status"] == "sale" and result["dry_run"]
-    assert (
-        s["escrow"].functions.available().call() == 0
-    )  # Preview did not persist sync.
+    assert not s["escrow"].functions.weeks(s["start"]).call()[0]
     submit(s, result)
     data = report(s["client"], s["c"])
     assert data["spent"] == str(1000 * 10**6)
@@ -152,24 +152,26 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     assert recovered["withdrawn_crvusd"] == data["proceeds_balance"]
 
 
-def test_boundary_sync_retries_and_works_while_paused(chain, tmp_path):
+def test_checkpoint_retries_while_paused_and_explicit_command_is_public(
+    chain, tmp_path
+):
     s = chain
     s["funding"].functions.purchase(s["start"], 1).transact({"from": s["manager"]})
     s["escrow"].functions.set_paused(True).transact({"from": s["manager"]})
-    s["tester"].time_travel(s["start"] - 299)
-    s["tester"].mine_block()
-    first = run(s["client"], s["c"], directory=tmp_path)
-    assert first["status"] == "sync"
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "sync"
-    submit(s, first)
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "paused"
     s["tester"].time_travel(s["start"] + 1)
     s["tester"].mine_block()
-    after = run(s["client"], s["c"], directory=tmp_path)
-    assert after["status"] == "sync"
-    submit(s, after)
+    first = run(s["client"], s["c"], directory=tmp_path)
+    assert first["status"] == "checkpoint"
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "checkpoint"
+    submit(s, first)
     assert s["escrow"].functions.weeks(s["start"]).call()[0]
     assert run(s["client"], s["c"], directory=tmp_path)["status"] == "paused"
+    s["escrow"].functions.set_keeper(s["keeper"], False).transact(
+        {"from": s["manager"]}
+    )
+    explicit = run(s["client"], s["c"], directory=tmp_path, checkpoint_only=True)
+    submit(s, explicit)
+    assert explicit["status"] == "checkpoint"
 
 
 def test_archive_read_excludes_boundary_block_revote(chain):
@@ -192,24 +194,56 @@ def test_archive_read_excludes_boundary_block_revote(chain):
     assert historical["slope"] == 10**12
 
 
-def test_final_tail_syncs_then_sells_below_normal_minimum(chain, tmp_path):
+def test_closing_sale_bypasses_minimum_and_sells_whole_claim(chain, tmp_path):
     s = chain
     begin(s)
     submit(s, run(s["client"], s["c"], directory=tmp_path))
-    s["c"]["min_trade_crv"] = "1000"
-    end = s["funding"].functions.END().call()
-    # First funded week has a small unsold tail; the final programme sync is still due.
-    s["tester"].time_travel(s["start"] + WEEK + 1)
-    s["escrow"].functions.sync().transact()
-    available = s["escrow"].functions.available().call()
-    s["escrow"].functions.sell(available - 10**18, 0).transact({"from": s["keeper"]})
-    s["tester"].time_travel(end + 1)
+    s["c"]["min_trade_crv"] = "1000000"
+    s["tester"].time_travel(s["start"] + WEEK - 600)
+    s["tester"].mine_block()
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "below minimum"
+    s["tester"].time_travel(s["start"] + WEEK - 180)
     s["tester"].mine_block()
     result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "sale" and result["crv"] == str(10**18)
+    assert result["status"] == "sale" and int(result["crv"]) > 1000 * 10**18
+    tx = submit(s, result)
+    receipt = s["client"].eth.get_transaction_receipt(tx)
+    assert receipt.status == 1
+    assert s["crv"].functions.balanceOf(s["receiver"]).call() == 0
+    assert (
+        s["gauge"].functions.integrate_fraction(s["receiver"]).call()
+        == s["minter"].functions.minted(s["receiver"], s["gauge"].address).call()
+    )
+
+
+def test_unfunded_sales_are_reported_with_zero_yearn_share(chain, tmp_path):
+    s = chain
+    s["tester"].time_travel(s["start"] + 40000)
+    s["tester"].mine_block()
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "sale"
     submit(s, result)
-    assert s["escrow"].functions.cursor().call() >= end
-    assert s["escrow"].functions.available().call() == 0
+    data = report(s["client"], s["c"])
+    assert data["spent"] == data["totals"]["retained"] == "0"
+    assert int(data["totals"]["sold"]) > 0
+    assert data["weeks"][0]["status"] == "Vyper only"
+    assert "earned" not in data["totals"] and "remaining" not in data["weeks"][0]
+
+
+def test_programme_end_tail_is_sold_for_vyper_below_minimum(chain, tmp_path):
+    s = chain
+    end = s["escrow"].functions.END().call()
+    s["tester"].time_travel(end - 180)
+    s["escrow"].functions.sell(0).transact({"from": s["keeper"]})
+    s["c"]["min_trade_crv"] = "1000000"
+    s["tester"].time_travel(end + 60)
+    s["tester"].mine_block()
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "sale"
+    submit(s, result)
+    data = report(s["client"], s["c"])
+    assert data["weeks"][-1]["week"] == str(end)
+    assert data["weeks"][-1]["retained"] == "0"
 
 
 def test_uncertain_broadcast_uses_chain_state_on_next_pass(
@@ -220,6 +254,7 @@ def test_uncertain_broadcast_uses_chain_state_on_next_pass(
     monkeypatch.setenv(
         "KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex()
     )
+    nonce = s["client"].eth.get_transaction_count(s["keeper"])
     original = s["client"].eth.send_raw_transaction
     hashes = []
 
@@ -233,7 +268,7 @@ def test_uncertain_broadcast_uses_chain_state_on_next_pass(
     assert s["client"].eth.get_transaction_receipt(hashes[0]).status == 1
     monkeypatch.setattr(s["client"].eth, "send_raw_transaction", original)
     assert run(s["client"], s["c"], True, tmp_path)["status"] == "below minimum"
-    assert s["client"].eth.get_transaction_count(s["keeper"]) == 1
+    assert s["client"].eth.get_transaction_count(s["keeper"]) == nonce + 1
     assert not (tmp_path / "pending.json").exists()
 
 

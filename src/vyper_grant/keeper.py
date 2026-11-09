@@ -6,7 +6,7 @@ from pathlib import Path
 from .core import WEEK, address, contract, named, units
 
 
-def run(client, c, send=False, directory="output/keeper", sync_only=False):
+def run(client, c, send=False, directory="output/keeper", checkpoint_only=False):
     root = Path(directory)
     root.mkdir(parents=True, exist_ok=True)
     with (root / "lock").open("a") as lock:
@@ -22,38 +22,31 @@ def run(client, c, send=False, directory="output/keeper", sync_only=False):
         now, block = head["timestamp"], head["number"]
         read = lambda fn: fn.call(block_identifier=block)
         week = now // WEEK * WEEK
-        cursor, start, end = read(f.cursor()), read(f.START()), read(f.END())
         current = named(f.weeks(week), block)
-        boundary_due = (
-            (
-                start <= week < end
-                and read(funding.functions.paid(week)) > 0
-                and not current["ready"]
-            )
-            or (
-                start <= week + WEEK <= end
-                and now % WEEK >= WEEK - 300
-                and cursor < week + WEEK - 300
-            )
-            or (cursor < end <= now)
-        )
-        # eth_call uses the actual sync code, including pending earnings, without a transaction.
-        available = read(f.sync())
-        fn, action = f.sync(), {"status": "sync", "available_crv": str(available)}
+        snapshot_due = read(funding.functions.paid(week)) > 0 and not current["ready"]
+        end = read(f.END())
+        closing = now % WEEK >= WEEK - 300 or end <= now < end + 300
         paused = read(f.paused())
         authorized = read(f.keepers(sender))
-        amount = min(available, units(c["max_trade_crv"]))
-        can_sell = amount > 0 and (amount >= units(c["min_trade_crv"]) or now >= end)
-        if not sync_only and not paused and authorized and can_sell:
-            minimum = read(f.quote(amount)) * (10000 - c["slippage_bps"]) // 10000
-            if minimum == 0:
-                return {"status": "below pool precision"}
-            fn = f.sell(amount, minimum)
-            action = {"status": "sale", "crv": str(amount), "min_crvusd": str(minimum)}
-        elif not (sync_only or boundary_due):
+        fn = f.checkpoint()
+        action = {"status": "checkpoint"}
+        if not checkpoint_only and not paused and authorized:
+            # Quote the whole claim in a simulation; no mint or state write persists.
+            amount, output = read(f.quote())
+            minimum = output * (10000 - c["slippage_bps"]) // 10000
+            if minimum > 0 and (closing or amount >= units(c["min_trade_crv"])):
+                fn = f.sell(minimum)
+                action = {
+                    "status": "sale",
+                    "crv": str(amount),
+                    "min_crvusd": str(minimum),
+                }
+            elif not snapshot_due:
+                return {"status": "below minimum"}
+        elif not (checkpoint_only or snapshot_due):
             if not authorized:
                 raise ValueError("Keeper is not authorized")
-            return {"status": "paused" if paused else "below minimum"}
+            return {"status": "paused"}
         fn.call({"from": sender})
         if not send:
             return {

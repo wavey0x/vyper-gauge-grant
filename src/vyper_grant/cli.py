@@ -136,7 +136,7 @@ def main():
     k.add_argument("--disable", action="store_true")
     s = sub.add_parser("set-paused")
     s.add_argument("paused", choices=["true", "false"])
-    for name in ["keeper", "sync"]:
+    for name in ["keeper", "checkpoint"]:
         k = sub.add_parser(name)
         k.add_argument("--send", action="store_true")
     r = sub.add_parser("report")
@@ -168,7 +168,7 @@ def main():
             atomic_json(out / "setup-manager.safe.json", manager)
             print("Prepared Vyper and manager setup batches")
             return
-        elif args.command in ["keeper", "sync"]:
+        elif args.command in ["keeper", "checkpoint"]:
             from .keeper import run
 
             print(
@@ -178,7 +178,7 @@ def main():
                         c,
                         args.send,
                         out / "keeper",
-                        sync_only=args.command == "sync",
+                        checkpoint_only=args.command == "checkpoint",
                     ),
                     indent=2,
                 )
@@ -189,12 +189,12 @@ def main():
             ef = escrow.functions
             meta = {}
             if args.command == "quote":
-                amount = min(ef.sync().call(), units(c["max_trade_crv"]))
+                amount, output = ef.quote().call()
                 print(
                     json.dumps(
                         {
                             "crv": str(amount),
-                            "crvusd": str(ef.quote(amount).call()),
+                            "crvusd": str(output),
                         }
                     )
                 )

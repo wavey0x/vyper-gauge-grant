@@ -6,7 +6,6 @@
   "start": null,
   "weeks": 26,
   "keeper": null,
-  "max_trade_crv": "1000",
   "min_trade_crv": "100",
   "slippage_bps": 50,
   "max_gas_gwei": "20"

@@ -55,7 +55,6 @@ def load_config(path):
         "start",
         "weeks",
         "keeper",
-        "max_trade_crv",
         "min_trade_crv",
         "slippage_bps",
         "max_gas_gwei",
@@ -78,8 +77,8 @@ def load_config(path):
             raise ValueError(key + " must be an integer")
     if not 0 <= c["slippage_bps"] < 10000:
         raise ValueError("Slippage must be between 0 and 9999 bps")
-    if not 0 < units(c["min_trade_crv"]) <= units(c["max_trade_crv"]):
-        raise ValueError("Require 0 < minimum trade <= maximum trade")
+    if units(c["min_trade_crv"]) == 0:
+        raise ValueError("Minimum trade must be positive")
     if not 1 <= c["weeks"] <= 52:
         raise ValueError("Invalid duration")
     if c.get("start") is not None and (int(c["start"]) <= 0 or int(c["start"]) % WEEK):

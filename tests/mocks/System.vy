@@ -1,4 +1,9 @@
 # pragma version ==0.4.3
+interface Minter:
+    def minted(account: address, gauge: address) -> uint256: view
+
+MINTER: constant(address) = 0xd061D61a4d941c39E5453435B6345Dc261C2fcE0
+
 struct Point:
     bias: uint256
     slope: uint256
@@ -87,3 +92,8 @@ def user_checkpoint(account: address) -> bool:
 @view
 def is_killed() -> bool:
     return self.killed or self.integrate_fraction[self.receiver] == self.max_emissions
+
+@external
+def claimable_tokens_write(account: address) -> uint256:
+    self._checkpoint()
+    return self.integrate_fraction[account] - staticcall Minter(MINTER).minted(account, self)

@@ -88,16 +88,16 @@ def report(client, c):
         rows[a["week"]] = dict(
             week=a["week"],
             paid=a["usdc"],
-            earned=0,
             sold=0,
             output=0,
             retained=0,
             purchase_tx=Web3.to_hex(event["transactionHash"]),
         )
-    for event in events(proceeds.events.Accrued()):
-        rows[event["args"]["week"]]["earned"] += event["args"]["crv"]
     for event in events(proceeds.events.Sold()):
         a = event["args"]
+        rows.setdefault(
+            a["week"], dict(week=a["week"], paid=0, sold=0, output=0, retained=0)
+        )
         if a["yearn"] > a["crvusd"]:
             raise ValueError("Sale conservation mismatch")
         for key, field in [
@@ -109,38 +109,26 @@ def report(client, c):
     spent = read(funding.functions.spent())
     if sum(r["paid"] for r in rows.values()) != spent:
         raise ValueError("Purchase ledger mismatch")
-    cursor = read(proceeds.functions.cursor())
     warnings = []
     for week, row in rows.items():
-        state = named(proceeds.functions.weeks(week), block)
-        if row["earned"] - row["sold"] != state["remaining"]:
-            raise ValueError("CRV inventory mismatch")
-        row.update(state)
-        needs_sync = week <= final["timestamp"] and (
-            cursor < min(week + WEEK, final["timestamp"] // WEEK * WEEK)
-            or (week + WEEK > final["timestamp"] and not state["ready"])
-        )
+        row.update(named(proceeds.functions.weeks(week), block))
+        current = week <= final["timestamp"] < week + WEEK
+        missing = current and row["paid"] > 0 and not row["ready"]
         row["status"] = (
             "Scheduled"
             if week > final["timestamp"]
-            else "Needs sync"
-            if needs_sync
-            else "Earning"
-            if week + WEEK > final["timestamp"]
-            else "Selling"
-            if state["remaining"]
-            else "Settled"
+            else "Needs checkpoint"
+            if missing
+            else "Active"
+            if current and row["paid"]
+            else "Vyper only"
+            if current
+            else "Closed"
         )
-        if needs_sync:
-            warnings.append(
-                "Weekly accounting needs a sync or a missing-weight recovery"
-            )
-    if sum(r["remaining"] for r in rows.values()) != read(
-        proceeds.functions.available()
-    ):
-        raise ValueError("Available CRV mismatch")
+        if missing:
+            warnings.append("The current funded week needs a vote snapshot")
     if read(proceeds.functions.paused()):
-        warnings.append("Sales are paused; public sync remains available")
+        warnings.append("Sales are paused; public checkpoint remains available")
     data = dict(
         as_of=final["timestamp"],
         block=block,
@@ -156,8 +144,7 @@ def report(client, c):
             )
         ),
         totals={
-            k: sum(r[k] for r in rows.values())
-            for k in ["earned", "sold", "output", "retained"]
+            k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "retained"]
         },
         weeks=sorted(rows.values(), key=lambda r: r["week"]),
         withdrawn_crvusd=sum(
