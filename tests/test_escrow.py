@@ -15,7 +15,8 @@ def begin(s, weeks=1):
 
 def preview(s):
     with boa.env.anchor():
-        return s.escrow.quote()
+        amount = s.escrow.claimable()
+        return amount, s.escrow.quote(amount)
 
 
 def sale(s):
@@ -23,6 +24,23 @@ def sale(s):
     with boa.env.prank(s.keeper):
         s.escrow.sell(output * 99 // 100)
     return amount, output
+
+
+def test_claimable_checkpoints_without_minting_and_quote_only_prices(system):
+    s = system
+    begin(s)
+    last = s.gauge.last_checkpoint()
+    minted = s.minter.minted(s.receiver, s.gauge.address)
+    balance = s.crv.balanceOf(s.receiver)
+    assert s.escrow.quote(0) == 0
+    assert s.escrow.quote(10 * UNIT) == s.pool.get_dy(2, 0, 10 * UNIT)
+    assert s.gauge.last_checkpoint() == last
+    amount = s.escrow.claimable()
+    assert amount > 0 and s.gauge.last_checkpoint() == boa.env.evm.patch.timestamp
+    assert s.minter.minted(s.receiver, s.gauge.address) == minted
+    assert s.crv.balanceOf(s.receiver) == balance
+    assert not s.escrow.weeks(s.start).ready
+    assert s.escrow.claimable() == amount
 
 
 def test_budget_is_assets_not_shares_or_yield(system):

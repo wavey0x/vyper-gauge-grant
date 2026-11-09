@@ -31,8 +31,9 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
         fn = f.checkpoint()
         action = {"status": "checkpoint"}
         if not checkpoint_only and not paused and authorized:
-            # Quote the whole claim in a simulation; no mint or state write persists.
-            amount, output = read(f.quote())
+            # Simulate the gauge checkpoint, then quote that amount at the same block.
+            amount = read(f.claimable())
+            output = read(f.quote(amount))
             minimum = output * (10000 - c["slippage_bps"]) // 10000
             if minimum > 0 and (closing or amount >= units(c["min_trade_crv"])):
                 fn = f.sell(minimum)

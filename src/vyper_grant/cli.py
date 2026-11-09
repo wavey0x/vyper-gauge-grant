@@ -189,7 +189,9 @@ def main():
             ef = escrow.functions
             meta = {}
             if args.command == "quote":
-                amount, output = ef.quote().call()
+                block = client.eth.block_number
+                amount = ef.claimable().call(block_identifier=block)
+                output = ef.quote(amount).call(block_identifier=block)
                 print(
                     json.dumps(
                         {

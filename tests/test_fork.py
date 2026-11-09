@@ -99,7 +99,8 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
 
         def sell():
             with boa.env.anchor():
-                amount, output = escrow.quote()
+                amount = escrow.claimable()
+                output = escrow.quote(amount)
             before_crv = crv.balanceOf(A["receiver"])
             before_usd = usd.balanceOf(A["receiver"])
             before_held = usd.balanceOf(escrow.address)
@@ -126,7 +127,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         assert 0 < share < 10**18
         assert first.week == start and first.yearn == first.crvusd * share // 10**18
         with boa.env.anchor():
-            assert escrow.quote() == (0, 0)
+            assert escrow.claimable() == 0
 
         boa.env.time_travel(seconds=start + WEEK - 180 - boa.env.evm.patch.timestamp)
         assert sell().week == start
@@ -165,7 +166,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
                 if capped:
                     assert gauge.is_killed() and final.crv > 0
                     with boa.env.anchor():
-                        assert escrow.quote() == (0, 0)
+                        assert escrow.claimable() == 0
                     break
             else:
                 raise AssertionError("Gauge did not reach its cap")

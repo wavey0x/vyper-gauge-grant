@@ -117,10 +117,14 @@ def set_missing_weight(week: uint256, yearn_weight: uint256):
     self._snapshot(week, yearn_weight, True)
 
 @external
-def quote() -> (uint256, uint256):
-    """Use eth_call: checkpoint the gauge and quote the entire pending claim."""
-    amount: uint256 = extcall Gauge(GAUGE).claimable_tokens_write(RECEIVER)
-    return amount, staticcall Pool(POOL).get_dy(2, 0, amount) if amount > 0 else 0
+def claimable() -> uint256:
+    """Checkpoint the gauge and return pending CRV; use eth_call to simulate."""
+    return extcall Gauge(GAUGE).claimable_tokens_write(RECEIVER)
+
+@external
+@view
+def quote(amount: uint256) -> uint256:
+    return staticcall Pool(POOL).get_dy(2, 0, amount) if amount > 0 else 0
 
 @external
 @nonreentrant

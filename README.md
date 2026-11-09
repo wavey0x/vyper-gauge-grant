@@ -50,7 +50,7 @@ Transfer yvUSDC-1 shares to FundingEscrow. The vault is `0xBe53A109B494E5c9f97b9
 uv run vyper-grant purchase --week THURSDAY_TIMESTAMP --usdc 2000 --reference 'OTC agreement'
 uv run vyper-grant checkpoint          # simulate a public vote snapshot
 uv run vyper-grant checkpoint --send
-uv run vyper-grant quote               # simulate quote() for the entire pending claim
+uv run vyper-grant quote               # simulate claimable(), then call quote(amount)
 uv run vyper-grant keeper              # simulate the next action
 uv run vyper-grant keeper --send
 uv run vyper-grant --out dashboard/dist report
@@ -58,7 +58,7 @@ uv run vyper-grant --out dashboard/dist report
 
 Purchases assume all of the designated Yearn voter's gauge weight for the week was bought. They do not cast votes or verify the commercial price. Call `checkpoint()` early in each funded week and before replacing Yearn's vote, preferably in the voting Safe's atomic batch. A missing snapshot is also captured by the first sale. If history was overwritten first, `set-missing-weight --week TIMESTAMP` prepares an archival lookup and manager batch for an unset snapshot.
 
-`quote()` returns `(pending_crv, expected_crvusd)`. It checkpoints the gauge, so its ABI is nonpayable; call it through **eth_call**, as the tooling does. It does not mint. The bot discounts the quote by `slippage_bps` and calls `sell(min_out)`. The executed claim may grow between quote and inclusion. There is no amount, week or deadline argument, no oracle floor and no partial sale.
+`claimable()` checkpoints the gauge and returns pending CRV without minting; use **eth_call** to simulate it. `quote(amount)` is a view returning the expected crvUSD output for a supplied CRV amount. The tooling reads both at the same block. The bot discounts the quote by `slippage_bps` and calls `sell(min_out)`. The executed claim may grow between quote and inclusion. There is no amount, week or deadline argument, no oracle floor and no partial sale.
 
 Schedule `ops/run.sh` every five minutes with `VYPER_GRANT_DIR` and `ETHEREUM_RPC_URL` set externally. `ops/run.sh checkpoint` requests only a snapshot. Set `KEEPER_SEND=1` and `KEEPER_PRIVATE_KEY` for the dedicated signer. Nothing is scheduled by this repository. Configure the normal minimum trade, slippage and gas limit. Closing sales bypass the minimum in each week's final five minutes, including the pre-start cleanup. A final cleanup also bypasses it in the first five minutes after programme end; that output belongs entirely to Vyper. All sales still require a positive quoted minimum and observe the gas limit. Stop automation and hand claims back to Vyper after the final cleanup.
 

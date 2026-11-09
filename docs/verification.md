@@ -1,6 +1,6 @@
 # Verification
 
-Verified November 9, 2026: **39 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent.
+Verified November 9, 2026: **40 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent.
 
 ```sh
 uv sync --extra dev
@@ -19,6 +19,6 @@ Operations tests deploy both production contracts through the Python builder wit
 
 Both contracts compile with Vyper 0.4.3 and generated ABI/bytecode matches the sources. Python static checks, shell syntax and whitespace checks pass. The built wheel loads the new ABI and renders the dashboard outside the checkout with compiler imports blocked. Desktop and 390px mobile layouts were inspected; the dashboard has no horizontal overflow or JavaScript errors.
 
-ProceedsEscrow is **160 lines**, down from 275, and its compiled runtime is **5,265 bytes**, down from 9,077. Its only mutable state is weekly captured/share records, keeper permissions and the pause flag. No accrual baselines, inflation rates, caps, inventories, cursors or lifetime accounting totals remain. A funded share is captured once; ordinary sales need no persistent escrow accounting writes.
+ProceedsEscrow is **164 lines**, down from 275, and its compiled runtime is **5,257 bytes**, down from 9,077. Its only mutable state is weekly captured/share records, keeper permissions and the pause flag. No accrual baselines, inflation rates, caps, inventories, cursors or lifetime accounting totals remain. A funded share is captured once; ordinary sales need no persistent escrow accounting writes.
 
-These checks verify claim-week settlement, not exact earning-week attribution or compliance with the operating agreement. Closing sales are best effort, external claimers must stop, and substantial outages require reconciliation. `quote()` uses eth_call to simulate the gauge checkpoint. No live deployment is recorded; fresh deployment is required. See [accounting](accounting.md) for the accepted assumptions.
+These checks verify claim-week settlement, not exact earning-week attribution or compliance with the operating agreement. Closing sales are best effort, external claimers must stop, and substantial outages require reconciliation. `claimable()` uses eth_call to simulate the gauge checkpoint; `quote(amount)` is a separate view. Tests verify that quoting leaves the gauge untouched and claimable checkpoints without minting. No live deployment is recorded; fresh deployment is required. See [accounting](accounting.md) for the accepted assumptions.

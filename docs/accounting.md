@@ -29,7 +29,7 @@ The [Curve controller](https://github.com/curvefi/curve-dao-contracts/blob/maste
 
 ## Quotes and records
 
-`quote()` uses the gauge's `claimable_tokens_write` and the fixed pool's `get_dy(2, 0, amount)`. Use eth_call so the gauge checkpoint remains simulated. Curve handles its own emission cap, annual reductions and checkpoint rounding. The escrow stores no accrual, inflation rate, emission cap, inventory, sale cursor or lifetime proceeds totals.
+`claimable()` calls the gauge's `claimable_tokens_write` and returns pending CRV. Use eth_call so its checkpoint remains simulated. The separate view `quote(amount)` calls the fixed pool's `get_dy(2, 0, amount)` and returns expected crvUSD. Both are read at the same block by the tooling. Curve handles its own emission cap, annual reductions and checkpoint rounding. The escrow stores no accrual, inflation rate, emission cap, inventory, sale cursor or lifetime proceeds totals.
 
 The keeper chooses a positive `min_out` from the full-claim quote. Cadence controls size; the minimum trade threshold is bypassed near rollover and at final cleanup. Pauses, gas limits, failed transactions or downtime can prevent a closing sale. The timing convention is best effort, not a contract guarantee.
 
