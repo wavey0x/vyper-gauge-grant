@@ -39,6 +39,25 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
                 "outputs": [],
             }
         ]
+        ctrl_abi += [
+            {
+                "name": "admin",
+                "type": "function",
+                "stateMutability": "view",
+                "inputs": [],
+                "outputs": [{"type": "address"}],
+            },
+            {
+                "name": "change_gauge_weight",
+                "type": "function",
+                "stateMutability": "nonpayable",
+                "inputs": [
+                    {"name": "gauge", "type": "address"},
+                    {"name": "weight", "type": "uint256"},
+                ],
+                "outputs": [],
+            },
+        ]
         ctrl = boa.loads_abi(json.dumps(ctrl_abi)).at(A["controller"])
         voter, keeper, payee = [boa.env.generate_address() for _ in range(3)]
         start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK
@@ -94,56 +113,77 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             ctrl.vote_for_gauge_weights(A["gauge"], 10000)
         with boa.env.prank(A["manager"]):
             for i in range(52):
-                funding.purchase(
-                    start + i * WEEK, 1000 * 10**6, b"fork".ljust(32, b"\0")
-                )
+                funding.purchase(start + i * WEEK, 1000 * 10**6)
             escrow.set_keeper(keeper, True)
-            escrow.set_limits(1000 * 10**18, 0, 200)
-            escrow.activate()
         assert usdc.balanceOf(payee) == 52000 * 10**6
         assert funding.spent() == 52000 * 10**6
         baseline = escrow.accrued()
         boa.env.time_travel(seconds=start + 3600 - boa.env.evm.patch.timestamp)
-        escrow.checkpoint()
-        first = escrow.weeks(start)
-        assert first.yearn > 0 and first.yearn < first.total
-        week, amount = escrow.next_sale()
+        with boa.env.anchor():
+            amount = escrow.sync()
+            first = escrow.weeks(start)
+            assert first.yearn > 0 and first.yearn < first.total
+        assert escrow.available() == 0  # The actual sale must perform its own sync.
         quote = escrow.quote(amount)
         before = usd.balanceOf(A["receiver"])
         with boa.env.prank(keeper):
-            escrow.sell(
-                week, amount, quote * 995 // 1000, boa.env.evm.patch.timestamp + 300
-            )
-        assert escrow.total_output() == quote
+            escrow.sell(amount, quote * 995 // 1000, boa.env.evm.patch.timestamp + 300)
+        assert escrow.available() == 0
         assert usd.balanceOf(escrow.address) == quote * first.yearn // first.total
         assert (
             usd.balanceOf(A["receiver"]) - before
             == quote - quote * first.yearn // first.total
         )
-        assert escrow.total_earned() <= escrow.accrued() - baseline
+        assert (escrow.available() + amount) <= escrow.accrued() - baseline
         # The next week is captured before a revote, after the controller's ten-day delay.
         boa.env.time_travel(
             seconds=max(start + WEEK + 3600, voted_at + 10 * 86400)
             - boa.env.evm.patch.timestamp
         )
-        escrow.checkpoint_vote(start + WEEK)
+        escrow.sync()
         frozen = escrow.weeks(start + WEEK)
         with boa.env.prank(voter):
             ctrl.vote_for_gauge_weights(A["gauge"], 0)
-        escrow.checkpoint()
+        escrow.sync()
         assert escrow.weeks(start + WEEK).yearn == frozen.yearn > 0
         boa.env.time_travel(
             seconds=start + 2 * WEEK + 3600 - boa.env.evm.patch.timestamp
         )
         gauge.user_checkpoint(A["receiver"])
-        escrow.checkpoint()
+        escrow.sync()
         assert escrow.weeks(start + 2 * WEEK).ready
         assert escrow.weeks(start + 2 * WEEK).yearn == 0
-        assert escrow.total_earned() <= escrow.accrued() - baseline
+        assert (escrow.available() + amount) <= escrow.accrued() - baseline
+        # Reach the actual gauge cap on a fork-only governance branch. Its public
+        # is_killed() now returns True, but the final accrued CRV must remain saleable.
+        with boa.env.anchor():
+            with boa.env.prank(ctrl.admin()):
+                ctrl.change_gauge_weight(A["gauge"], 10**36)
+            reached = False
+            for _ in range(12):
+                boa.env.time_travel(seconds=WEEK)
+                before_available = escrow.available()
+                gauge.user_checkpoint(A["receiver"])
+                reached = (
+                    gauge.integrate_fraction(A["receiver"]) == gauge.max_emissions()
+                )
+                escrow.sync()
+                if reached:
+                    assert gauge.is_killed()
+                    assert escrow.available() > before_available
+                    quote = escrow.quote(10**18)
+                    with boa.env.prank(keeper):
+                        escrow.sell(
+                            10**18,
+                            quote * 995 // 1000,
+                            boa.env.evm.patch.timestamp + 300,
+                        )
+                    break
+            assert reached
         gas = 0
         for _ in range(4):
             boa.env.time_travel(seconds=16 * WEEK)
-            escrow.checkpoint()
+            escrow.sync()
             gas = max(gas, escrow._computation.get_gas_used())
         assert escrow.weeks(start + 51 * WEEK).ready
         assert gas < 15_000_000

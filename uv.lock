@@ -3571,10 +3571,9 @@ wheels = [
 
 [[package]]
 name = "vyper-grant"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
-    { name = "vyper" },
     { name = "web3" },
 ]
 
@@ -3583,6 +3582,7 @@ dev = [
     { name = "eth-tester", extra = ["py-evm"] },
     { name = "pytest" },
     { name = "titanoboa" },
+    { name = "vyper" },
 ]
 
 [package.metadata]
@@ -3590,7 +3590,7 @@ requires-dist = [
     { name = "eth-tester", extras = ["py-evm"], marker = "extra == 'dev'", specifier = "==0.13.0b1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<9" },
     { name = "titanoboa", marker = "extra == 'dev'", specifier = "==0.2.8" },
-    { name = "vyper", specifier = "==0.4.3" },
+    { name = "vyper", marker = "extra == 'dev'", specifier = "==0.4.3" },
     { name = "web3", specifier = "==7.16.0" },
 ]
 provides-extras = ["dev"]

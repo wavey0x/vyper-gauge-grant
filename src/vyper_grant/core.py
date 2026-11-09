@@ -57,8 +57,6 @@ def load_config(path):
         "keeper",
         "max_trade_crv",
         "min_trade_crv",
-        "cooldown",
-        "deviation_bps",
         "slippage_bps",
         "max_gas_gwei",
     }
@@ -74,18 +72,16 @@ def load_config(path):
         "deployment_block",
         "start",
         "weeks",
-        "cooldown",
         "slippage_bps",
-        "deviation_bps",
     ]:
         if c.get(key) is not None and type(c[key]) is not int:
             raise ValueError(key + " must be an integer")
-    if not 0 <= int(c["slippage_bps"]) <= int(c["deviation_bps"]) <= 1000:
-        raise ValueError("Require 0 <= slippage <= price deviation <= 1000 bps")
+    if not 0 <= c["slippage_bps"] < 10000:
+        raise ValueError("Slippage must be between 0 and 9999 bps")
     if not 0 < units(c["min_trade_crv"]) <= units(c["max_trade_crv"]):
         raise ValueError("Require 0 < minimum trade <= maximum trade")
-    if not 1 <= int(c["weeks"]) <= 52 or not 0 <= int(c["cooldown"]) <= WEEK:
-        raise ValueError("Invalid duration or cooldown")
+    if not 1 <= c["weeks"] <= 52:
+        raise ValueError("Invalid duration")
     if c.get("start") is not None and (int(c["start"]) <= 0 or int(c["start"]) % WEEK):
         raise ValueError("Start must be a Thursday 00:00 UTC timestamp")
     return c
@@ -93,12 +89,24 @@ def load_config(path):
 
 @lru_cache
 def artifact(name):
+    return json.loads((ROOT / "abi/contracts.json").read_text())[name]
+
+
+def build():
+    """Compilation belongs to the build step, never to a keeper/report pass."""
     from vyper import compile_code
 
-    return compile_code(
-        (ROOT / "contracts" / (CONTRACTS[name] + ".vy")).read_text(),
-        output_formats=["abi", "bytecode", "bytecode_runtime"],
-    )
+    result = {
+        name: compile_code(
+            (ROOT / "contracts" / (source + ".vy")).read_text(),
+            output_formats=["abi", "bytecode", "bytecode_runtime"],
+        )
+        for name, source in CONTRACTS.items()
+    }
+    atomic_json(ROOT / "abi/contracts.json", result)
+    artifact.cache_clear()
+    abi.cache_clear()
+    return result
 
 
 @lru_cache

@@ -14,7 +14,6 @@ event Purchased:
     week: indexed(uint256)
     usdc: uint256
     shares: uint256
-    reference: bytes32
 
 event Recovered:
     token: indexed(address)
@@ -55,18 +54,17 @@ def remaining() -> uint256:
 
 @external
 @nonreentrant
-def purchase(week: uint256, amount: uint256, reference: bytes32):
+def purchase(week: uint256, amount: uint256):
     assert msg.sender == MANAGER, "manager"
     assert week >= START and week < END and week % WEEK == 0, "week"
     assert week > block.timestamp and self.paid[week] == 0, "future unpaid week"
     assert amount > 0 and self.spent + amount <= BUDGET, "budget"
-    assert reference != empty(bytes32), "reference"
     self.paid[week] = amount
     self.spent += amount
     before: uint256 = staticcall Token(USDC).balanceOf(PAYEE)
     shares: uint256 = extcall Vault(VAULT).withdraw(amount, PAYEE, self, 0)
     assert staticcall Token(USDC).balanceOf(PAYEE) - before == amount, "payment"
-    log Purchased(week=week, usdc=amount, shares=shares, reference=reference)
+    log Purchased(week=week, usdc=amount, shares=shares)
 
 @external
 @nonreentrant

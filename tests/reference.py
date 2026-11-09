@@ -1,6 +1,6 @@
 """Integer reference model; input times and amounts are never floating point."""
 
-from .core import WEEK
+from vyper_grant.core import WEEK
 
 YEAR = 365 * 86400
 REDUCTION = 1189207115002721024

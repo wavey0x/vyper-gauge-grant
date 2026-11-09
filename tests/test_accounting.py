@@ -1,9 +1,9 @@
 from random import Random
 import boa
 import pytest
-from conftest import WEEK, UNIT, advance
-from test_escrow import REF, begin, sale
-from vyper_grant.accounting import partition, weight
+from conftest import WEEK, UNIT, advance, deploy_proceeds
+from test_escrow import begin, sale
+from reference import partition, weight
 
 
 def test_conservative_bound_under_arbitrary_checkpoint_partitions():
@@ -32,12 +32,13 @@ def test_annual_cut_and_boundary_partition_match_reference(system, cut_offset):
     s = system
     cut = s.start + WEEK + cut_offset
     s.gauge.set_params(s.gauge.max_emissions(), s.gauge.inflation_rate(), cut, False)
+    deploy_proceeds(s)
     begin(s, 3)
     anchor = s.escrow.cursor()
     accrued = s.escrow.accrued()
     rate, epoch = s.gauge.inflation_rate(), s.gauge.future_epoch_time()
     previous = {
-        w: s.escrow.weeks(w).earned
+        w: s.escrow.weeks(w).remaining
         for w in [s.start, s.start + WEEK, s.start + 2 * WEEK]
     }
     for t in [
@@ -52,12 +53,12 @@ def test_annual_cut_and_boundary_partition_match_reference(system, cut_offset):
     stop = boa.env.evm.patch.timestamp
     weights = {w: s.gauge.gauge_relative_weight(s.gauge.address, w) for w in previous}
     rows, low, high, _, _ = partition(
-        anchor, stop, rate, epoch, s.escrow.cap() - accrued, weights
+        anchor, stop, rate, epoch, s.escrow.CAP() - accrued, weights
     )
-    s.escrow.checkpoint()
+    s.escrow.sync()
     assert low <= s.escrow.accrued() - accrued <= high
     for w in previous:
-        assert s.escrow.weeks(w).earned - previous[w] == sum(
+        assert s.escrow.weeks(w).remaining - previous[w] == sum(
             n for week, n in rows if week == w
         )
 
@@ -75,10 +76,10 @@ def test_cap_near_boundary_never_assigns_future_week_earnings(system, cap_fracti
     s.gauge.set_params(
         cap, s.gauge.inflation_rate(), s.gauge.future_epoch_time(), False
     )
+    deploy_proceeds(s)
     with boa.env.prank(s.manager):
-        s.funding.purchase(s.start, 1, REF)
-        s.funding.purchase(s.start + WEEK, 1, REF)
-        s.escrow.activate()
+        s.funding.purchase(s.start, 1)
+        s.funding.purchase(s.start + WEEK, 1)
     advance(s.start)
     s.gauge.user_checkpoint(s.receiver)
     before = s.gauge.integrate_fraction(s.receiver)
@@ -89,10 +90,10 @@ def test_cap_near_boundary_never_assigns_future_week_earnings(system, cap_fracti
     advance(s.start + WEEK + 3600)
     s.gauge.user_checkpoint(s.receiver)
     second = s.gauge.integrate_fraction(s.receiver) - before
-    s.escrow.checkpoint()
-    assert s.escrow.weeks(s.start).earned <= first
-    assert s.escrow.weeks(s.start + WEEK).earned <= second
-    assert s.escrow.total_earned() <= first + second
+    s.escrow.sync()
+    assert s.escrow.weeks(s.start).remaining <= first
+    assert s.escrow.weeks(s.start + WEEK).remaining <= second
+    assert s.escrow.available() <= first + second
 
 
 def test_third_party_claims_and_partial_sales_do_not_duplicate_earnings(system):
@@ -103,13 +104,11 @@ def test_third_party_claims_and_partial_sales_do_not_duplicate_earnings(system):
     with boa.env.prank(s.stranger):
         s.gauge.mint_for(s.gauge.address, s.receiver)
     advance(s.start + 7200)
-    s.escrow.checkpoint()
-    earned = s.escrow.total_earned()
+    s.escrow.sync()
     sale(s, 10 * UNIT)
     sale(s)
-    assert s.escrow.total_sold() == earned
-    assert s.escrow.checkpoint() == 0
-    assert s.escrow.next_sale() == (0, 0)
+    assert s.escrow.available() == 0
+    assert s.escrow.sync() == 0
 
 
 def test_return_transfer_failure_rolls_back_claim_pull_and_swap(system):
@@ -122,16 +121,16 @@ def test_return_transfer_failure_rolls_back_claim_pull_and_swap(system):
         sale(s)
     assert s.gauge.minted(s.receiver, s.gauge.address) == minted
     assert s.crv.balanceOf(s.receiver) == balance
-    assert s.escrow.total_sold() == s.escrow.total_output() == 0
+    assert s.usd.balanceOf(s.escrow.address) == 0
 
 
 def test_expired_vote_and_zero_total_are_distinct(system):
     s = system
     s.gauge.set_vote(s.voter, 10**12, s.start, s.start - 1)
     begin(s)
-    sale(s)
-    assert s.escrow.total_retained() == 0
-    assert s.usd.balanceOf(s.receiver) == s.escrow.total_output()
+    _, output = sale(s)
+    assert s.usd.balanceOf(s.escrow.address) == 0
+    assert s.usd.balanceOf(s.receiver) == output
     assert weight(10**12, s.start, s.start) == 0
 
 
@@ -146,7 +145,7 @@ def test_cap_change_stops_new_accrual_but_recovery_remains_available(system):
     )
     advance(s.start + 7200)
     with boa.reverts("cap changed"):
-        s.escrow.checkpoint()
+        s.escrow.sync()
     with boa.env.prank(s.manager):
         s.escrow.set_paused(True)
         s.funding.recover(s.vault.address, s.vault.balanceOf(s.funding.address))
@@ -158,26 +157,26 @@ def test_final_week_tail_is_booked_and_end_is_terminal(system):
     s = system
     last = s.funding.END() - WEEK
     with boa.env.prank(s.manager):
-        s.funding.purchase(last, 1, REF)
-        s.escrow.activate()
+        s.funding.purchase(last, 1)
     advance(s.funding.END() + 100)
-    s.escrow.checkpoint()
-    assert s.escrow.weeks(last).earned > 0
+    s.escrow.sync()
+    assert s.escrow.weeks(last).remaining > 0
     cursor = s.escrow.cursor()
+    available = s.escrow.available()
     advance(s.funding.END() + WEEK)
-    assert s.escrow.checkpoint() == 0
+    assert s.escrow.sync() == available
     assert s.escrow.cursor() == cursor
 
 
 def test_missing_mint_permission_and_revoked_keeper(system):
     s = system
-    with boa.env.prank(s.receiver):
-        s.gauge.toggle_approve_mint(s.escrow.address)
-    with boa.env.prank(s.manager), boa.reverts("mint permission"):
-        s.escrow.activate()
-    with boa.env.prank(s.receiver):
-        s.gauge.toggle_approve_mint(s.escrow.address)
     begin(s)
+    with boa.env.prank(s.receiver):
+        s.gauge.toggle_approve_mint(s.escrow.address)
+    with boa.reverts("mint permission"):
+        sale(s)
+    with boa.env.prank(s.receiver):
+        s.gauge.toggle_approve_mint(s.escrow.address)
     with boa.env.prank(s.manager):
         s.escrow.set_keeper(s.keeper, False)
     with boa.reverts("keeper or paused"):
@@ -213,34 +212,30 @@ def test_maximum_catchup_fits_transaction_gas(system):
         s.usdc.approve(s.vault.address, 100_000 * 10**6)
         s.vault.deposit(100_000 * 10**6, funding.address)
         for i in range(52):
-            funding.purchase(s.start + i * WEEK, 10**6, REF)
+            funding.purchase(s.start + i * WEEK, 10**6)
     with boa.env.prank(s.receiver):
         s.gauge.toggle_approve_mint(escrow.address)
     for w in range(s.start - WEEK, s.start + 65 * WEEK, WEEK):
         s.gauge.set_weight(w, 4 * max(0, s.start + 52 * WEEK - w) * 10**12, 10**16 + 17)
-    with boa.env.prank(s.manager):
-        escrow.activate()
     gas = 0
     for _ in range(4):
         advance(escrow.cursor() + 16 * WEEK)
-        escrow.checkpoint()
+        escrow.sync()
         gas = max(gas, escrow._computation.get_gas_used())
     assert gas < 15_000_000
     assert escrow.weeks(s.start + 51 * WEEK).ready
-    assert escrow.total_earned() > 0
+    assert escrow.available() > 0
     print("maximum catch-up gas:", gas)
 
 
 def test_excessive_downtime_preserves_accounting_and_recovery(system):
     s = system
-    with boa.env.prank(s.manager):
-        s.escrow.activate()
     cursor = s.escrow.cursor()
     advance(cursor + 16 * WEEK + 1)
     with boa.reverts("catch-up limit"):
-        s.escrow.checkpoint()
+        s.escrow.sync()
     assert s.escrow.cursor() == cursor
-    assert s.escrow.total_earned() == 0
+    assert s.escrow.available() == 0
     with boa.env.prank(s.manager):
         s.funding.recover(s.vault.address, s.vault.balanceOf(s.funding.address))
     assert s.vault.balanceOf(s.funding.address) == 0

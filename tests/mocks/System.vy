@@ -22,7 +22,7 @@ allowed_to_mint_for: public(HashMap[address, HashMap[address, bool]])
 max_emissions: public(uint256)
 inflation_rate: public(uint256)
 future_epoch_time: public(uint256)
-is_killed: public(bool)
+killed: bool
 last_checkpoint: public(uint256)
 
 @deploy
@@ -49,7 +49,7 @@ def set_params(cap: uint256, rate: uint256, epoch: uint256, killed: bool):
     self.max_emissions = cap
     self.inflation_rate = rate
     self.future_epoch_time = epoch
-    self.is_killed = killed
+    self.killed = killed
 
 @external
 def checkpoint_gauge(gauge: address):
@@ -77,7 +77,7 @@ def _checkpoint():
             self.future_epoch_time = epoch
         else:
             amount = rate * weight * (stop - start) // 10**18
-        if self.is_killed:
+        if self.killed:
             amount = 0
         self.integrate_fraction[self.receiver] = min(self.max_emissions, self.integrate_fraction[self.receiver] + amount)
         if self.integrate_fraction[self.receiver] == self.max_emissions:
@@ -101,3 +101,8 @@ def mint_for(gauge: address, account: address):
         amount: uint256 = self.integrate_fraction[account] - self.minted[account][gauge]
         self.minted[account][gauge] += amount
         extcall Token(self.token).mint(account, amount)
+
+@external
+@view
+def is_killed() -> bool:
+    return self.killed or self.integrate_fraction[self.receiver] == self.max_emissions

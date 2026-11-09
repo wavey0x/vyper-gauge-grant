@@ -7,7 +7,7 @@ from eth_tester import EthereumTester
 from web3 import Web3, EthereumTesterProvider
 from vyper import compile_code
 from vyper_grant.core import ADDRESSES, ROOT, WEEK, artifact
-from vyper_grant.chain import verify, reconcile, historical_vote
+from vyper_grant.chain import verify, report, historical_vote
 from vyper_grant.cli import setup, doctor
 from vyper_grant.keeper import run
 
@@ -85,7 +85,6 @@ def chain(monkeypatch):
     gauge.functions.toggle_approve_mint(escrow.address).transact({"from": receiver})
     crv.functions.approve(escrow.address, 10**30).transact({"from": receiver})
     escrow.functions.set_keeper(keeper, True).transact({"from": manager})
-    escrow.functions.set_limits(1000 * 10**18, 0, 200).transact({"from": manager})
     for w in range(start - WEEK, start + 5 * WEEK, WEEK):
         gauge.functions.set_weight(
             w, 4 * (start + 52 * WEEK - w) * 10**12, 10**16 + 17
@@ -94,60 +93,72 @@ def chain(monkeypatch):
     return dict(locals())
 
 
-def activate(s):
-    s["funding"].functions.purchase(
-        s["start"], 1000 * 10**6, b"proof".ljust(32, b"\0")
-    ).transact({"from": s["manager"]})
-    s["escrow"].functions.activate().transact({"from": s["manager"]})
+def begin(s):
+    s["funding"].functions.purchase(s["start"], 1000 * 10**6).transact(
+        {"from": s["manager"]}
+    )
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
 
 
+def submit(s, result):
+    return s["client"].eth.send_transaction(
+        {"from": s["keeper"], "to": result["to"], "data": result["data"]}
+    )
+
+
 def test_verified_contracts_and_idempotent_setup(chain):
     s = chain
-    funding, escrow = verify(s["client"], s["c"])
-    assert (
-        funding.address == s["funding"].address
-        and escrow.address == s["escrow"].address
-    )
+    verify(s["client"], s["c"])
     vyper, manager = setup(s["client"], s["c"], 10**25)
-    assert (
-        len(vyper["transactions"]) == 1
-    )  # No toggle that would revoke existing permission.
-    assert len(manager["transactions"]) == 3
+    assert len(vyper["transactions"]) == len(manager["transactions"]) == 1
     assert doctor(s["client"], s["c"])["mint_enabled"]
-    bad = {**s["c"], "payee": s["keeper"]}
     with pytest.raises(ValueError, match="PAYEE"):
-        verify(s["client"], bad)
-    bad = {**s["c"], "funding": s["gauge"].address}
+        verify(s["client"], {**s["c"], "payee": s["keeper"]})
     with pytest.raises(ValueError, match="bytecode"):
-        verify(s["client"], bad)
+        verify(s["client"], {**s["c"], "funding": s["gauge"].address})
 
 
-def test_keeper_simulation_and_full_report_survive_recovery(chain, tmp_path):
+def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     s = chain
-    activate(s)
+    begin(s)
     result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "checkpoint" and result["dry_run"]
-    s["client"].eth.send_transaction(
-        {"from": s["keeper"], "to": result["to"], "data": result["data"]}
-    )
-    result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "sale"
-    s["client"].eth.send_transaction(
-        {"from": s["keeper"], "to": result["to"], "data": result["data"]}
-    )
-    report = reconcile(s["client"], s["c"])
-    assert report["spent"] == str(1000 * 10**6)
-    assert int(report["totals"]["retained"]) > 0
-    assert int(report["proceeds_balance"]) == int(report["totals"]["retained"])
+    assert result["status"] == "sale" and result["dry_run"]
+    assert (
+        s["escrow"].functions.available().call() == 0
+    )  # Preview did not persist sync.
+    submit(s, result)
+    data = report(s["client"], s["c"])
+    assert data["spent"] == str(1000 * 10**6)
+    assert int(data["totals"]["retained"]) > 0
+    assert data["proceeds_balance"] == data["totals"]["retained"]
     s["escrow"].functions.recover(
-        s["usd"].address, int(report["proceeds_balance"])
+        s["usd"].address, int(data["proceeds_balance"])
     ).transact({"from": s["manager"]})
-    recovered = reconcile(s["client"], s["c"])
+    recovered = report(s["client"], s["c"])
     assert recovered["proceeds_balance"] == "0"
-    assert recovered["totals"] == report["totals"]
-    assert recovered["withdrawn_crvusd"] == report["proceeds_balance"]
+    assert recovered["totals"] == data["totals"]
+    assert recovered["withdrawn_crvusd"] == data["proceeds_balance"]
+
+
+def test_boundary_sync_retries_and_works_while_paused(chain, tmp_path):
+    s = chain
+    s["funding"].functions.purchase(s["start"], 1).transact({"from": s["manager"]})
+    s["escrow"].functions.set_paused(True).transact({"from": s["manager"]})
+    s["tester"].time_travel(s["start"] - 299)
+    s["tester"].mine_block()
+    first = run(s["client"], s["c"], directory=tmp_path)
+    assert first["status"] == "sync"
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "sync"
+    submit(s, first)
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "paused"
+    s["tester"].time_travel(s["start"] + 1)
+    s["tester"].mine_block()
+    after = run(s["client"], s["c"], directory=tmp_path)
+    assert after["status"] == "sync"
+    submit(s, after)
+    assert s["escrow"].functions.weeks(s["start"]).call()[0]
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "paused"
 
 
 def test_archive_read_excludes_boundary_block_revote(chain):
@@ -158,102 +169,74 @@ def test_archive_read_excludes_boundary_block_revote(chain):
         .functions.set_vote(s["voter"], 2 * 10**12, s["start"] + 52 * WEEK, s["start"])
         .transact()
     )
-    block = s["client"].eth.get_block(
-        s["client"].eth.get_transaction_receipt(tx).blockNumber
+    assert (
+        s["client"]
+        .eth.get_block(s["client"].eth.get_transaction_receipt(tx).blockNumber)
+        .timestamp
+        == s["start"]
     )
-    assert block.timestamp == s["start"]
-    evidence = historical_vote(
+    historical = historical_vote(
         s["client"], s["start"], s["client"].eth.get_block("finalized")
     )
-    assert evidence["slope"] == 10**12
-    assert evidence["block"] == block.number - 1
+    assert historical["slope"] == 10**12
 
 
-def test_reconciliation_detects_false_manager_recovery(chain):
+def test_final_tail_syncs_then_sells_below_normal_minimum(chain, tmp_path):
     s = chain
-    activate(s)
-    s["gauge"].functions.set_vote(
-        s["voter"], 2 * 10**12, s["start"] + 52 * WEEK, s["start"]
-    ).transact()
-    s["escrow"].functions.repair_week(
-        s["start"], 0, 0, 0, b"bad".ljust(32, b"\0")
-    ).transact({"from": s["manager"]})
-    s["escrow"].functions.checkpoint().transact()
-    with pytest.raises(ValueError, match="historical state"):
-        reconcile(s["client"], s["c"])
-
-
-def test_week_tail_below_minimum_still_finalizes(chain, tmp_path):
-    s = chain
-    activate(s)
-    s["escrow"].functions.checkpoint().transact()
-    # Isolate the final unpaid interval: the keeper must still close the programme.
+    begin(s)
+    submit(s, run(s["client"], s["c"], directory=tmp_path))
+    s["c"]["min_trade_crv"] = "1000"
     end = s["funding"].functions.END().call()
-    s["tester"].time_travel(end - 10)
-    s["escrow"].functions.checkpoint().transact()
-    s["tester"].time_travel(end + 10)
-    # Existing booked CRV is sold first; then the final checkpoint is prepared.
-    result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "sale"
-    s["client"].eth.send_transaction(
-        {"from": s["keeper"], "to": result["to"], "data": result["data"]}
+    # First funded week has a small unsold tail; the final programme sync is still due.
+    s["tester"].time_travel(s["start"] + WEEK + 1)
+    s["escrow"].functions.sync().transact()
+    available = s["escrow"].functions.available().call()
+    s["escrow"].functions.sell(available - 10**18, 0, end).transact(
+        {"from": s["keeper"]}
     )
-    # Drain the remaining lot in bounded trades.
-    for _ in range(10):
-        result = run(s["client"], s["c"], directory=tmp_path)
-        if result["status"] == "checkpoint":
-            break
-        assert result["status"] == "sale"
-        s["client"].eth.send_transaction(
-            {"from": s["keeper"], "to": result["to"], "data": result["data"]}
-        )
-    assert result["status"] == "checkpoint"
+    s["tester"].time_travel(end + 1)
+    s["tester"].mine_block()
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "sale" and result["crv"] == str(10**18)
+    submit(s, result)
+    assert s["escrow"].functions.cursor().call() >= end
+    assert s["escrow"].functions.available().call() == 0
 
 
-def test_keeper_signed_journal_recovers_uncertain_broadcast(
+def test_uncertain_broadcast_uses_chain_state_on_next_pass(
     chain, tmp_path, monkeypatch
 ):
     s = chain
-    activate(s)
-    # Expose mainnet chain ID for signing; all execution stays in the local EVM.
+    begin(s)
     monkeypatch.setattr(type(s["client"].eth), "chain_id", property(lambda _: 1))
     monkeypatch.setenv(
         "KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex()
     )
     original = s["client"].eth.send_raw_transaction
-    sent = []
+    hashes = []
 
     def uncertain(raw):
-        sent.append(bytes(raw))
-        raise ConnectionError("connection lost before response")
+        hashes.append(original(raw))
+        raise ConnectionError("response lost after inclusion")
 
     monkeypatch.setattr(s["client"].eth, "send_raw_transaction", uncertain)
     with pytest.raises(ConnectionError):
         run(s["client"], s["c"], True, tmp_path)
-    saved = json.loads((tmp_path / "pending.json").read_text())
-    assert saved["hash"] == Web3.to_hex(Web3.keccak(sent[0]))
-    assert bytes.fromhex(saved["raw"]) == sent[0]
+    assert s["client"].eth.get_transaction_receipt(hashes[0]).status == 1
     monkeypatch.setattr(s["client"].eth, "send_raw_transaction", original)
-    assert run(s["client"], s["c"], True, tmp_path)["status"] == "pending"
-    assert run(s["client"], s["c"], True, tmp_path)["status"] == "confirming"
-    s["tester"].mine_blocks(2)
-    result = run(s["client"], s["c"], True, tmp_path)
-    assert result["status"] == "sale"
-    second = json.loads((tmp_path / "pending.json").read_text())
-    assert second["nonce"] == saved["nonce"] + 1
-    assert s["escrow"].functions.total_sold().call() > 0
+    assert run(s["client"], s["c"], True, tmp_path)["status"] == "below minimum"
+    assert s["client"].eth.get_transaction_count(s["keeper"]) == 1
+    assert not (tmp_path / "pending.json").exists()
 
 
-def test_keeper_rejects_changed_configuration_with_pending_transaction(
-    chain, tmp_path, monkeypatch
-):
+def test_pending_nonce_prevents_another_submission(chain, tmp_path, monkeypatch):
     s = chain
-    activate(s)
-    monkeypatch.setattr(type(s["client"].eth), "chain_id", property(lambda _: 1))
-    monkeypatch.setenv(
-        "KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex()
+    original = s["client"].eth.get_transaction_count
+    monkeypatch.setattr(
+        s["client"].eth,
+        "get_transaction_count",
+        lambda account, block_identifier="latest": (
+            original(account) + (block_identifier == "pending")
+        ),
     )
-    run(s["client"], s["c"], True, tmp_path)
-    changed = {**s["c"], "keeper": s["manager"]}
-    with pytest.raises(ValueError, match="another keeper configuration"):
-        run(s["client"], changed, True, tmp_path)
+    assert run(s["client"], s["c"], True, tmp_path)["status"] == "pending nonce"

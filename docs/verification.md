@@ -1,20 +1,24 @@
 # Verification
 
-Verified November 9, 2026: **39 tests passed**, including a real Ethereum fork at block **26,379,075**. No live transaction was sent.
+Verified November 9, 2026: **41 tests passed**, including a real Ethereum fork at block **26,379,075**. No live transaction was sent.
 
 ```sh
 uv sync --extra dev
-RUN_FORK_TESTS=1 uv run --no-sync pytest -q -s
 uv run --no-sync vyper-grant --out build build
+RUN_FORK_TESTS=1 uv run --no-sync pytest -q -s
 uv build
 ```
 
-The fork reads `ETHEREUM_RPC_URL`. It deposits into the real yvUSDC-1 vault, withdraws exact USDC payments, creates a controlled voter's veCRV lock, votes in the real GaugeController, claims from the deployed Vyper gauge, and swaps through the configured CRV/crvUSD pool. It checks the atomic split, preserves a snapshot across a revote, and advances through a 52-week programme in bounded catch-ups. The largest tested 16-week checkpoint used **13,642,310 gas**. This is measured coverage of that fork state, not a universal gas guarantee.
+The fork deposits into the real yvUSDC-1 vault, withdraws exact USDC payments, creates a controlled veCRV voter, votes in the real GaugeController, claims from the deployed Vyper gauge and sells through the fixed pool. The first sale performs its own sync. Subsequent checks cover capture before a revote and a 52-week programme with bounded catch-ups. The largest tested 16-week sync used **13,629,336 gas**; this measures that fork state and is not a universal gas guarantee.
 
-Contract tests cover the lifetime budget despite vault yield and withdrawals, future-week payment restrictions, exact payment rollback, permission changes, immutable weekly ratios, missing-history recovery, annual rate cuts, cap exhaustion, unrelated balances, independent minting, repeated partial sales, dust, and atomic rollback when a swap or return transfer fails. A deterministic 3,000-case test checks the conservative accrual bounds against arbitrary third-party checkpoint partitions. Excessive downtime leaves the accounting cursor unchanged and preserves manager recovery.
+A separate branch of the same local fork changes gauge weight under an impersonated governance account until the real fundraising gauge reaches its cap. Its `is_killed()` then returns true. The escrow still books and sells the final earnings. This catches the production behavior the previous mock omitted; the mock now reflects it too. No governance or token transaction leaves the fork.
 
-Operations tests deploy both contracts in a local EVM and exercise the Python tooling: bytecode and immutable verification, setup authorization, archival reads immediately before boundary-block votes, detection of false historical recovery, keeper simulation and signed execution, journal recovery after an uncertain broadcast, nonce reuse prevention, final small sales, event reconciliation, and reporting after manager withdrawals. Report tests cover exact decimal conversion and script-safe embedding.
+Contract tests exercise the 100k budget, vault yield and recovery, exact withdrawal failure rollback, first-sale auto-sync, permissionless repeated sync, capture at the exact weekly boundary, syncing while paused, missing-weight recovery bounds, independent minting, annual rate changes, cap exhaustion, unrelated balances, and atomic rollback of sync/claim/pull/swap/return. One swap consumes two weeks with different ratios; another consumes a one-wei old remainder alongside newer earnings. A deterministic 3,000-case test checks conservative attribution under arbitrary third-party checkpoint partitions.
 
-Both Vyper contracts compile with 0.4.3. The distributable wheel was extracted outside the checkout and checked for contract compilation, dependency ABIs and dashboard generation. Python static checks, shell syntax and whitespace checks pass. The dashboard was inspected at desktop and 390-pixel mobile widths, with no horizontal overflow or browser errors.
+Operations tests deploy both contracts in a local EVM and exercise setup, deployment verification, historical reads before a boundary-block revote, the normal one-sale keeper pass, pre/post-boundary retries while paused, final small sales, pending-nonce handling, and recovery after a sale succeeds but its RPC response is lost. Finalized event reports preserve earned totals after manager withdrawals. Tests also check precise decimal conversion, script-safe rendering and that generated artifacts match the Vyper sources.
 
-The fork uses a controlled voter to exercise voting semantics; it does not impersonate Yearn governance to approve a real commercial purchase. Historical voter recovery remains a trusted manager action, and the pool's price guard uses its own moving average. These boundaries and the operating stops are described in [accounting](accounting.md). Deployment addresses, the agreed OTC payee, start date and keeper remain unset in the example configuration.
+Both contracts compile with Vyper 0.4.3. Routine keeper and report code loads generated artifacts without importing Vyper. The wheel is checked outside the checkout for artifact loading and dashboard generation with compiler imports disabled. Python static checks, shell syntax and whitespace checks pass. The dashboard retains its previously inspected desktop/mobile layout; this refactor changes its data source, not the interface.
+
+Weekly storage is reduced from seven fields to four: captured flag, Yearn weight, total weight and remaining CRV. There are no stored lifetime reporting totals or sale output counters. The cap is immutable; rate/epoch writes occur only at an annual boundary, and unchanged accrual/inventory writes are skipped. The keeper owns slippage, sizing and cadence; these are intentionally no longer enforced as additional contract policies.
+
+Historical voter recovery remains a trusted manager action. The fork uses a controlled voter, not a real Yearn governance authorization. The agreed payee, programme start and keeper must be configured before fresh deployments. Operating assumptions and stops are described in [accounting](accounting.md).

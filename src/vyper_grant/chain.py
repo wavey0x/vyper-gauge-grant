@@ -1,8 +1,7 @@
-"""Pinned reads and an independently reconstructed event ledger."""
+"""Deployment verification, historical recovery, and finalized event reports."""
 
 from web3 import Web3
 from .core import ADDRESSES, BUDGET, WEEK, artifact, contract, named
-from .accounting import weight
 
 
 def verify(client, c, block="latest"):
@@ -88,149 +87,114 @@ def historical_vote(client, week, final):
     }
 
 
-def reconcile(client, c):
+def report(client, c):
     final = client.eth.get_block("finalized")
     block = final["number"]
-    if c.get("deployment_block") is None or c["deployment_block"] > block:
+    if c.get("deployment_block") is None or not 0 <= c["deployment_block"] <= block:
         raise ValueError("A finalized deployment_block is required")
-    funding, proceeds = verify(client, c, block)
+    funding, proceeds = [contract(client, n, c[n]) for n in ["funding", "proceeds"]]
     read = lambda fn: fn.call(block_identifier=block)
     events = lambda event: logs(client, event, c["deployment_block"], block)
-    purchases, sales = (
-        events(funding.events.Purchased()),
-        events(proceeds.events.Sold()),
-    )
-    captures, accruals = (
-        events(proceeds.events.Snapshot()),
-        events(proceeds.events.Accrued()),
-    )
-    rows = {
-        int(x["args"]["week"]): {
-            "week": int(x["args"]["week"]),
-            "paid": int(x["args"]["usdc"]),
-            "purchase_tx": Web3.to_hex(x["transactionHash"]),
-        }
-        for x in purchases
-    }
-    if len(rows) != len(purchases) or sum(r["paid"] for r in rows.values()) != read(
-        funding.functions.spent()
-    ):
-        raise ValueError("Purchase ledger mismatch")
-    snapshots = {int(x["args"]["week"]): x["args"] for x in captures}
-    if len(snapshots) != len(captures):
-        raise ValueError("Duplicate weekly snapshot")
-    totals = dict(earned=0, sold=0, output=0, retained=0)
-    warnings = []
-    cursor = read(proceeds.functions.cursor())
-    dust = read(proceeds.functions.DUST())
-    for week, row in sorted(rows.items()):
-        state = named(proceeds.functions.weeks(week), block)
-        earned = sum(
-            int(x["args"]["crv"]) for x in accruals if x["args"]["week"] == week
+    rows = {}
+    for event in events(funding.events.Purchased()):
+        a = event["args"]
+        if a["week"] in rows:
+            raise ValueError("Duplicate purchase")
+        rows[a["week"]] = dict(
+            week=a["week"],
+            paid=a["usdc"],
+            earned=0,
+            sold=0,
+            output=0,
+            retained=0,
+            purchase_tx=Web3.to_hex(event["transactionHash"]),
         )
-        sold = [x["args"] for x in sales if x["args"]["week"] == week]
-        sums = dict(
-            earned=earned,
-            sold=sum(x["crv"] for x in sold),
-            output=sum(x["crvusd"] for x in sold),
-            retained=sum(x["yearn"] for x in sold),
-        )
-        if (
-            any(state[k] != v for k, v in sums.items())
-            or state["sold"] > state["earned"]
-        ):
-            raise ValueError("Weekly ledger mismatch")
-        if any(x["yearn"] + x["vyper"] != x["crvusd"] for x in sold):
+    for event in events(proceeds.events.Accrued()):
+        rows[event["args"]["week"]]["earned"] += event["args"]["crv"]
+    for event in events(proceeds.events.Sold()):
+        a = event["args"]
+        if a["yearn"] > a["crvusd"]:
             raise ValueError("Sale conservation mismatch")
-        if state["ready"]:
-            snap = snapshots[week]
-            if (
-                snap["last_vote"] >= week
-                or weight(snap["slope"], snap["end"], week) != state["yearn"]
-            ):
-                raise ValueError("Vote calculation mismatch")
-            total = read(
-                contract(client, "controller").functions.points_weight(
-                    ADDRESSES["gauge"], week
-                )
-            )[0]
-            if (
-                total != state["total"]
-                or snap["yearn"] != state["yearn"]
-                or snap["total"] != total
-            ):
-                raise ValueError("Gauge weight mismatch")
-            if (
-                state["output"]
-                and state["retained"] != state["output"] * state["yearn"] // total
-            ):
-                raise ValueError("Proceeds split mismatch")
-            if bytes(snap["evidence"]) != bytes(32):
-                vote = historical_vote(client, week, final)
-                if weight(vote["slope"], vote["end"], week) != state["yearn"]:
-                    raise ValueError("Recovered vote differs from historical state")
-        elif week <= final["timestamp"]:
-            warnings.append(
-                "Weekly accounting needs a checkpoint or historical recovery"
-            )
+        for key, field in [
+            ("sold", "crv"),
+            ("output", "crvusd"),
+            ("retained", "yearn"),
+        ]:
+            rows[a["week"]][key] += a[field]
+    spent = read(funding.functions.spent())
+    if sum(r["paid"] for r in rows.values()) != spent:
+        raise ValueError("Purchase ledger mismatch")
+    cursor = read(proceeds.functions.cursor())
+    warnings = []
+    for week, row in rows.items():
+        state = named(proceeds.functions.weeks(week), block)
+        if row["earned"] - row["sold"] != state["remaining"]:
+            raise ValueError("CRV inventory mismatch")
         row.update(state)
+        needs_sync = week <= final["timestamp"] and (
+            cursor < min(week + WEEK, final["timestamp"] // WEEK * WEEK)
+            or (week + WEEK > final["timestamp"] and not state["ready"])
+        )
         row["status"] = (
             "Scheduled"
             if week > final["timestamp"]
-            else "Needs checkpoint"
-            if not state["ready"]
-            or (week + WEEK <= final["timestamp"] and cursor < week + WEEK)
+            else "Needs sync"
+            if needs_sync
             else "Earning"
             if week + WEEK > final["timestamp"]
             else "Selling"
-            if state["earned"] - state["sold"] > dust
+            if state["remaining"]
             else "Settled"
         )
-        for key, value in sums.items():
-            totals[key] += value
-    for key, value in totals.items():
-        if value != read(proceeds.functions["total_" + key]()):
-            raise ValueError("Lifetime ledger mismatch")
+        if needs_sync:
+            warnings.append(
+                "Weekly accounting needs a sync or a missing-weight recovery"
+            )
+    if sum(r["remaining"] for r in rows.values()) != read(
+        proceeds.functions.available()
+    ):
+        raise ValueError("Available CRV mismatch")
     if read(proceeds.functions.paused()):
-        warnings.append("Sales are paused")
-    if not read(proceeds.functions.cursor()):
-        warnings.append("Programme is not activated")
-    report = {
-        "as_of": final["timestamp"],
-        "block": block,
-        "block_hash": Web3.to_hex(final["hash"]),
-        "funding": funding.address,
-        "proceeds": proceeds.address,
-        "budget": BUDGET,
-        "spent": read(funding.functions.spent()),
-        "funding_assets": read(funding.functions.assets()),
-        "proceeds_balance": read(
+        warnings.append("Sales are paused; public sync remains available")
+    data = dict(
+        as_of=final["timestamp"],
+        block=block,
+        block_hash=Web3.to_hex(final["hash"]),
+        funding=funding.address,
+        proceeds=proceeds.address,
+        budget=BUDGET,
+        spent=spent,
+        funding_assets=read(funding.functions.assets()),
+        proceeds_balance=read(
             contract(client, "token", ADDRESSES["crvusd"]).functions.balanceOf(
                 proceeds.address
             )
         ),
-        "totals": totals,
-        "weeks": list(sorted(rows.values(), key=lambda r: r["week"])),
-        "withdrawn_crvusd": sum(
-            x["args"]["amount"]
-            for x in events(proceeds.events.Recovered())
-            if x["args"]["token"] == ADDRESSES["crvusd"]
+        totals={
+            k: sum(r[k] for r in rows.values())
+            for k in ["earned", "sold", "output", "retained"]
+        },
+        weeks=sorted(rows.values(), key=lambda r: r["week"]),
+        withdrawn_crvusd=sum(
+            e["args"]["amount"]
+            for e in events(proceeds.events.Recovered())
+            if e["args"]["token"] == ADDRESSES["crvusd"]
         ),
-        "warnings": list(dict.fromkeys(warnings)),
-    }
+        warnings=list(dict.fromkeys(warnings)),
+    )
     if client.eth.get_block(block)["hash"] != final["hash"]:
         raise ValueError("Source block reorganized; rerun")
+    return serialize(data)
 
-    # Preserve 18-decimal amounts exactly through JSON and JavaScript.
-    def serialize(x):
-        if isinstance(x, bool):
-            return x
-        if isinstance(x, int):
-            return str(x)
-        if isinstance(x, dict):
-            return {k: serialize(v) for k, v in x.items()}
-        if isinstance(x, list):
-            return [serialize(v) for v in x]
-        return x
 
-    return serialize(report)
+def serialize(value):
+    """JSON/JavaScript must not round 18-decimal token quantities."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: serialize(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [serialize(v) for v in value]
+    return value

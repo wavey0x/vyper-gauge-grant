@@ -4,10 +4,10 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from web3 import Web3
 from .core import (
     ADDRESSES as A,
     CONTRACTS,
+    build,
     address,
     artifact,
     atomic_json,
@@ -16,7 +16,7 @@ from .core import (
     rpc,
     units,
 )
-from .chain import historical_vote, reconcile, verify
+from .chain import historical_vote, report, verify
 from .report import render
 
 
@@ -69,14 +69,7 @@ def setup(client, c, allowance):
     ]
     if not m.allowed_to_mint_for(escrow.address, A["receiver"]).call():
         calls.append(m.toggle_approve_mint(escrow.address))
-    manager = [
-        escrow.functions.set_limits(
-            units(c["max_trade_crv"]), c["cooldown"], c["deviation_bps"]
-        ),
-        escrow.functions.set_keeper(address(c["keeper"]), True),
-    ]
-    if not escrow.functions.cursor().call():
-        manager.append(escrow.functions.activate())
+    manager = [escrow.functions.set_keeper(address(c["keeper"]), True)]
     return batch(A["receiver"], *calls), batch(A["manager"], *manager)
 
 
@@ -103,7 +96,6 @@ def doctor(client, c):
         result.update(
             funding_assets=str(f.functions.assets().call()),
             remaining_budget=str(f.functions.remaining().call()),
-            activated=bool(p.functions.cursor().call()),
             paused=p.functions.paused().call(),
             keeper_enabled=p.functions.keepers(c["keeper"]).call(),
             mint_enabled=contract(client, "minter")
@@ -125,7 +117,7 @@ def main():
     p.add_argument("--config", default="config/live.json")
     p.add_argument("--out", default="output")
     sub = p.add_subparsers(dest="command", required=True)
-    for name in ["build", "doctor", "quote", "checkpoint", "reconcile", "limits"]:
+    for name in ["build", "doctor", "quote"]:
         sub.add_parser(name)
     d = sub.add_parser("deploy")
     d.add_argument("contract", choices=CONTRACTS)
@@ -135,10 +127,9 @@ def main():
     f = sub.add_parser("purchase")
     f.add_argument("--week", type=int, required=True)
     f.add_argument("--usdc", required=True)
-    f.add_argument("--reference", required=True)
-    for name in ["repair-week", "checkpoint-vote"]:
-        s = sub.add_parser(name)
-        s.add_argument("--week", type=int, required=True)
+    f.add_argument("--reference", help="Human-readable Safe description")
+    s = sub.add_parser("set-missing-weight")
+    s.add_argument("--week", type=int, required=True)
     r = sub.add_parser("recover")
     r.add_argument("contract", choices=CONTRACTS)
     r.add_argument("--token", required=True)
@@ -148,19 +139,20 @@ def main():
     k.add_argument("--disable", action="store_true")
     s = sub.add_parser("set-paused")
     s.add_argument("paused", choices=["true", "false"])
-    k = sub.add_parser("keeper")
-    k.add_argument("--send", action="store_true")
+    for name in ["keeper", "sync"]:
+        k = sub.add_parser(name)
+        k.add_argument("--send", action="store_true")
     r = sub.add_parser("report")
-    r.add_argument("--input", default="output/report.json")
+    r.add_argument("--input", help="Render saved data instead of reading the chain")
     args = p.parse_args()
     out = Path(args.out)
     try:
         if args.command == "build":
-            for name in CONTRACTS:
-                atomic_json(out / (name + ".json"), artifact(name))
+            for name, compiled in build().items():
+                atomic_json(out / (name + ".json"), compiled)
             print("Built both Vyper contracts")
             return
-        if args.command == "report":
+        if args.command == "report" and args.input:
             render(json.loads(Path(args.input).read_text()), out)
             print(str((out / "index.html").resolve()))
             return
@@ -169,9 +161,9 @@ def main():
             result = deployment(client, c, args.contract, args.deployer)
         elif args.command == "doctor":
             result = doctor(client, c)
-        elif args.command == "reconcile":
-            atomic_json(out / "report.json", reconcile(client, c))
-            print(str(out / "report.json"))
+        elif args.command == "report":
+            render(report(client, c), out)
+            print(str((out / "index.html").resolve()))
             return
         elif args.command == "setup":
             vyper, manager = setup(client, c, units(args.allowance_crv))
@@ -179,21 +171,31 @@ def main():
             atomic_json(out / "setup-manager.safe.json", manager)
             print("Prepared Vyper and manager setup batches")
             return
-        elif args.command == "keeper":
+        elif args.command in ["keeper", "sync"]:
             from .keeper import run
 
-            print(json.dumps(run(client, c, args.send, out / "keeper"), indent=2))
+            print(
+                json.dumps(
+                    run(
+                        client,
+                        c,
+                        args.send,
+                        out / "keeper",
+                        sync_only=args.command == "sync",
+                    ),
+                    indent=2,
+                )
+            )
             return
         else:
             funding, escrow = verify(client, c)
             ef = escrow.functions
             meta = {}
             if args.command == "quote":
-                week, amount = ef.next_sale().call()
+                amount = min(ef.sync().call(), units(c["max_trade_crv"]))
                 print(
                     json.dumps(
                         {
-                            "week": week,
                             "crv": str(amount),
                             "crvusd": str(ef.quote(amount).call()),
                         }
@@ -201,33 +203,18 @@ def main():
                 )
                 return
             if args.command == "purchase":
-                reference = Web3.keccak(text=args.reference)
-                fn = funding.functions.purchase(
-                    args.week, units(args.usdc, 6), reference
-                )
-                meta = {
-                    "reference": args.reference,
-                    "referenceHash": Web3.to_hex(reference),
-                }
-            elif args.command == "checkpoint":
-                fn = ef.checkpoint()
-            elif args.command == "checkpoint-vote":
-                fn = ef.checkpoint_vote(args.week)
-            elif args.command == "repair-week":
-                evidence = historical_vote(
+                fn = funding.functions.purchase(args.week, units(args.usdc, 6))
+                if args.reference:
+                    meta = {"description": args.reference}
+            elif args.command == "set-missing-weight":
+                historical = historical_vote(
                     client, args.week, client.eth.get_block("finalized")
                 )
-                digest = Web3.keccak(
-                    text=json.dumps(evidence, sort_keys=True, separators=(",", ":"))
+                yearn_weight = historical["slope"] * max(
+                    historical["end"] - args.week, 0
                 )
-                fn = ef.repair_week(
-                    args.week,
-                    evidence["slope"],
-                    evidence["end"],
-                    evidence["last_vote"],
-                    digest,
-                )
-                meta = {"evidence": evidence, "evidenceHash": Web3.to_hex(digest)}
+                fn = ef.set_missing_weight(args.week, yearn_weight)
+                meta = {"historicalVote": historical, "yearnWeight": str(yearn_weight)}
             elif args.command == "recover":
                 fn = (
                     funding if args.contract == "funding" else escrow
@@ -236,10 +223,6 @@ def main():
                 fn = ef.set_keeper(address(args.account), not args.disable)
             elif args.command == "set-paused":
                 fn = ef.set_paused(args.paused == "true")
-            elif args.command == "limits":
-                fn = ef.set_limits(
-                    units(c["max_trade_crv"]), c["cooldown"], c["deviation_bps"]
-                )
             fn.call({"from": A["manager"]})
             result = batch(A["manager"], fn, **meta)
         path = out / (args.command + ".json")

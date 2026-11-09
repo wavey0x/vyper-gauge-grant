@@ -8,8 +8,6 @@
   "keeper": null,
   "max_trade_crv": "1000",
   "min_trade_crv": "100",
-  "cooldown": 3600,
-  "deviation_bps": 200,
   "slippage_bps": 50,
   "max_gas_gwei": "20"
 }

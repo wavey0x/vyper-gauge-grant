@@ -21,12 +21,6 @@ def configure(price: uint256, execution_bps: uint256):
 
 @external
 @view
-def price_oracle(index: uint256) -> uint256:
-    assert index == 1
-    return self.price
-
-@external
-@view
 def get_dy(i: uint256, j: uint256, amount: uint256) -> uint256:
     assert i == 2 and j == 0
     return amount * self.price // 10**18
