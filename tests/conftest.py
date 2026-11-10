@@ -36,12 +36,13 @@ def deploy_mocks():
     return dict(
         usdc=load("Token", "usdc"),
         crv=load("Token", "crv"),
-        usd=load("Token", "crvusd"),
+        crvusd=load("Token", "crvusd"),
         vault=load("Vault", "vault", A["usdc"]),
         gauge=load("System", "gauge", A["receiver"]),
         controller=load("Controller", "controller", A["gauge"]),
         minter=load("Minter", "minter", A["crv"]),
         pool=load("Pool", "pool", A["crv"], A["crvusd"]),
+        stable_pool=load("StablePool", "stable_pool", A["usdc"], A["crvusd"]),
     )
 
 
@@ -50,7 +51,9 @@ def system():
     manager, receiver, voter = A["manager"], A["receiver"], A["voter"]
     payee, keeper, stranger = [boa.env.generate_address() for _ in range(3)]
     mocks = deploy_mocks()
-    usdc, crv, usd, vault, gauge, controller, minter, pool = mocks.values()
+    usdc, crv, crvusd, vault, gauge, controller, minter, pool, stable_pool = (
+        mocks.values()
+    )
     start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK
     funding = boa.load(str(ROOT / "contracts/FundingEscrow.vy"), payee, start, 8)
     usdc.mint(manager, 100_000 * 10**6)

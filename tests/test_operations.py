@@ -9,7 +9,7 @@ from web3 import Web3, EthereumTesterProvider
 from conftest import deploy_mocks
 from vyper_grant.core import ADDRESSES, ROOT, WEEK, artifact
 from vyper_grant.chain import verify, report, historical_vote
-from vyper_grant.cli import setup, doctor, deployment
+from vyper_grant.cli import setup, doctor, deployment, main
 from vyper_grant.keeper import run
 
 
@@ -32,7 +32,8 @@ def chain(monkeypatch):
             storage={slot: boa.env.get_storage(mock.address, slot) for slot in slots},
         )
     manager, receiver, voter = [ADDRESSES[k] for k in ["manager", "receiver", "voter"]]
-    for account in [manager, receiver]:
+    governance = ADDRESSES["governance"]
+    for account in [manager, receiver, governance]:
         genesis[bytes.fromhex(account[2:])] = dict(
             balance=10**24, nonce=0, code=b"", storage={}
         )
@@ -51,7 +52,9 @@ def chain(monkeypatch):
     original_sign = backend._get_normalized_and_signed_evm_transaction
 
     def sign(transaction, block_number="latest"):
-        if transaction["from"] in [bytes.fromhex(a[2:]) for a in [manager, receiver]]:
+        if transaction["from"] in [
+            bytes.fromhex(a[2:]) for a in [manager, receiver, governance]
+        ]:
             unsigned = backend._get_normalized_and_unsigned_evm_transaction(
                 transaction, block_number
             )
@@ -73,7 +76,7 @@ def chain(monkeypatch):
             address=receipt.contractAddress, abi=artifact(name)["abi"]
         )
 
-    usdc, crv, usd, vault, gauge, controller, minter, pool = [
+    usdc, crv, crvusd, vault, gauge, controller, minter, pool, stable_pool = [
         client.eth.contract(address=str(mock.address), abi=mock.abi)
         for mock in mocks.values()
     ]
@@ -141,15 +144,83 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     submit(s, result)
     data = report(s["client"], s["c"])
     assert data["spent"] == str(1000 * 10**6)
-    assert int(data["totals"]["retained"]) > 0
-    assert data["proceeds_balance"] == data["totals"]["retained"]
+    assert int(data["totals"]["yearn"]) > 0
+    assert data["proceeds_balance"] == data["totals"]["yearn"]
     s["escrow"].functions.recover(
-        s["usd"].address, int(data["proceeds_balance"])
+        s["usdc"].address, int(data["proceeds_balance"])
     ).transact({"from": s["manager"]})
     recovered = report(s["client"], s["c"])
     assert recovered["proceeds_balance"] == "0"
     assert recovered["totals"] == data["totals"]
-    assert recovered["withdrawn_crvusd"] == data["proceeds_balance"]
+    assert recovered["withdrawn_usdc"] == data["proceeds_balance"]
+
+
+def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain, tmp_path):
+    s = chain
+    begin(s)
+    submit(s, run(s["client"], s["c"], directory=tmp_path))
+    held = s["usdc"].functions.balanceOf(s["escrow"].address).call()
+    s["escrow"].functions.set_yearn_receiver(s["payee"]).transact(
+        {"from": s["manager"]}
+    )
+    before = s["usdc"].functions.balanceOf(s["payee"]).call()
+    s["tester"].time_travel(s["start"] + 80000)
+    s["tester"].mine_block()
+    submit(s, run(s["client"], s["c"], directory=tmp_path))
+    data = report(s["client"], s["c"])
+    forwarded = s["usdc"].functions.balanceOf(s["payee"]).call() - before
+    assert forwarded > 0
+    assert data["yearn_receiver"] == s["payee"]
+    assert data["proceeds_balance"] == str(held)
+    assert data["forwarded_usdc"] == str(forwarded)
+    assert int(data["totals"]["yearn"]) == held + forwarded
+
+
+def test_cli_prepares_receiver_change_and_governance_clawback(
+    chain, tmp_path, monkeypatch
+):
+    s = chain
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(s["c"]))
+    monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
+
+    def prepare(*args):
+        monkeypatch.setattr(
+            "sys.argv",
+            ["vyper-grant", "--config", str(config), "--out", str(tmp_path), *args],
+        )
+        main()
+        return json.loads((tmp_path / (args[0] + ".json")).read_text())
+
+    change = prepare("set-yearn-receiver", "--account", s["payee"])
+    assert change["meta"]["safeAddress"] == s["manager"]
+    s["client"].eth.send_transaction(
+        {
+            "from": s["manager"],
+            **{k: change["transactions"][0][k] for k in ["to", "data"]},
+        }
+    )
+    assert s["escrow"].functions.yearn_receiver().call() == s["payee"]
+    # Governance clawback must work without a deployed or configured seller.
+    config.write_text(json.dumps({**s["c"], "proceeds": None}))
+    shares = s["vault"].functions.balanceOf(s["funding"].address).call()
+    recovery = prepare(
+        "recover",
+        "funding",
+        "--governance",
+        "--token",
+        s["vault"].address,
+        "--amount-raw",
+        str(shares),
+    )
+    assert recovery["meta"]["safeAddress"] == s["governance"]
+    s["client"].eth.send_transaction(
+        {
+            "from": s["governance"],
+            **{k: recovery["transactions"][0][k] for k in ["to", "data"]},
+        }
+    )
+    assert s["vault"].functions.balanceOf(s["governance"]).call() == shares
 
 
 def test_checkpoint_retries_while_paused_and_explicit_command_is_public(
@@ -224,7 +295,7 @@ def test_unfunded_sales_are_reported_with_zero_yearn_share(chain, tmp_path):
     assert result["status"] == "sale"
     submit(s, result)
     data = report(s["client"], s["c"])
-    assert data["spent"] == data["totals"]["retained"] == "0"
+    assert data["spent"] == data["totals"]["yearn"] == "0"
     assert int(data["totals"]["sold"]) > 0
     assert data["weeks"][0]["status"] == "Vyper only"
     assert "earned" not in data["totals"] and "remaining" not in data["weeks"][0]
@@ -243,7 +314,7 @@ def test_programme_end_tail_is_sold_for_vyper_below_minimum(chain, tmp_path):
     submit(s, result)
     data = report(s["client"], s["c"])
     assert data["weeks"][-1]["week"] == str(end)
-    assert data["weeks"][-1]["retained"] == "0"
+    assert data["weeks"][-1]["yearn"] == "0"
 
 
 def test_uncertain_broadcast_uses_chain_state_on_next_pass(

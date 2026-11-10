@@ -94,6 +94,7 @@ def doctor(client, c):
             funding_assets=str(f.functions.assets().call()),
             remaining_budget=str(f.functions.remaining().call()),
             paused=p.functions.paused().call(),
+            yearn_receiver=p.functions.yearn_receiver().call(),
             keeper_enabled=p.functions.keepers(c["keeper"]).call(),
             mint_enabled=contract(client, "minter")
             .functions.allowed_to_mint_for(p.address, A["receiver"])
@@ -109,7 +110,7 @@ def doctor(client, c):
 
 def main():
     p = argparse.ArgumentParser(
-        description="Vyper programme: vault funding and crvUSD proceeds"
+        description="Vyper programme: vault funding and USDC proceeds"
     )
     p.add_argument("--config", default="config/live.json")
     p.add_argument("--out", default="output")
@@ -131,6 +132,15 @@ def main():
     r.add_argument("contract", choices=CONTRACTS)
     r.add_argument("--token", required=True)
     r.add_argument("--amount-raw", type=int, required=True)
+    r.add_argument(
+        "--governance", action="store_true", help="Recover funding to ychad.eth"
+    )
+    r = sub.add_parser("set-yearn-receiver")
+    r.add_argument(
+        "--account",
+        required=True,
+        help="Use the proceeds contract to resume accumulation",
+    )
     k = sub.add_parser("set-keeper")
     k.add_argument("--account", required=True)
     k.add_argument("--disable", action="store_true")
@@ -185,9 +195,16 @@ def main():
             )
             return
         else:
-            funding, escrow = verify(client, c)
-            ef = escrow.functions
+            funding_only = args.command == "purchase" or (
+                args.command == "recover" and args.contract == "funding"
+            )
+            if funding_only:
+                (funding,) = verify(client, c, names=("funding",))
+            else:
+                funding, escrow = verify(client, c)
+                ef = escrow.functions
             meta = {}
+            sender = A["manager"]
             if args.command == "quote":
                 block = client.eth.block_number
                 amount = ef.claimable().call(block_identifier=block)
@@ -196,7 +213,7 @@ def main():
                     json.dumps(
                         {
                             "crv": str(amount),
-                            "crvusd": str(output),
+                            "usdc": str(output),
                         }
                     )
                 )
@@ -215,15 +232,23 @@ def main():
                 fn = ef.set_missing_weight(args.week, yearn_weight)
                 meta = {"historicalVote": historical, "yearnWeight": str(yearn_weight)}
             elif args.command == "recover":
+                if args.governance:
+                    if args.contract != "funding":
+                        raise ValueError(
+                            "Governance recovery applies to the funding contract"
+                        )
+                    sender = A["governance"]
                 fn = (
                     funding if args.contract == "funding" else escrow
                 ).functions.recover(address(args.token), args.amount_raw)
+            elif args.command == "set-yearn-receiver":
+                fn = ef.set_yearn_receiver(address(args.account))
             elif args.command == "set-keeper":
                 fn = ef.set_keeper(address(args.account), not args.disable)
             elif args.command == "set-paused":
                 fn = ef.set_paused(args.paused == "true")
-            fn.call({"from": A["manager"]})
-            result = batch(A["manager"], fn, **meta)
+            fn.call({"from": sender})
+            result = batch(sender, fn, **meta)
         path = out / (args.command + ".json")
         atomic_json(path, result)
         print(str(path))

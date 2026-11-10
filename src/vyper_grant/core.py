@@ -14,6 +14,7 @@ if not (ROOT / "contracts/FundingEscrow.vy").exists():
 WEEK, BUDGET = 604800, 100_000 * 10**6
 ADDRESSES = {
     "manager": "0x4444AAAACDBa5580282365e25b16309Bd770ce4a",
+    "governance": "0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52",
     "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     "vault": "0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204",
     "crv": "0xD533a949740bb3306d119CC777fa900bA034cd52",
@@ -24,6 +25,7 @@ ADDRESSES = {
     "controller": "0x2F50D538606Fa9EDD2B11E2446BEb18C9D5846bB",
     "minter": "0xd061D61a4d941c39E5453435B6345Dc261C2fcE0",
     "pool": "0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14",
+    "stable_pool": "0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E",
 }
 CONTRACTS = {"funding": "FundingEscrow", "proceeds": "ProceedsEscrow"}
 

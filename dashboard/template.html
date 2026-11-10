@@ -13,10 +13,10 @@
 <div id="notices" role="status"></div>
 <section class="summary" aria-label="Programme balances">
 <div><h2>Funding held</h2><div class="value"><span id="assets">—</span><span class="unit">USDC</span></div><p class="detail" id="spent">Held in yvUSDC-1</p><div class="track" aria-hidden="true"><div class="fill" id="progress"></div></div></div>
-<div><h2>Proceeds held</h2><div class="value"><span id="balance">—</span><span class="unit">crvUSD</span></div><p class="detail" id="retained">Yearn’s share of gauge proceeds</p></div>
+<div><h2>Proceeds held</h2><div class="value"><span id="balance">—</span><span class="unit">USDC</span></div><p class="detail" id="yearn">Yearn’s share of gauge proceeds</p><p class="detail" id="destination">Future proceeds accumulate here.</p></div>
 </section>
 <section aria-label="Weekly settlement"><div class="heading"><h2>Weekly settlement</h2><span class="muted">By claim week · UTC</span></div>
-<table><thead><tr><th scope="col">Week</th><th scope="col">Paid · USDC</th><th scope="col">Yearn share</th><th scope="col">Retained · crvUSD</th></tr></thead><tbody id="weeks"></tbody></table><p id="empty">No weekly activity yet.</p></section>
+<table><thead><tr><th scope="col">Week</th><th scope="col">Paid · USDC</th><th scope="col">Yearn share</th><th scope="col">Yearn · USDC</th></tr></thead><tbody id="weeks"></tbody></table><p id="empty">No weekly activity yet.</p></section>
 <footer><span id="returned">Other voters’ proceeds return directly to Vyper.</span><div class="links" id="links"><a href="report.json">Data</a></div></footer>
 </main>
 <script>
@@ -26,9 +26,10 @@ const amount=(x,d)=>{const n=big(x),scale=10n**BigInt(d),whole=n/scale,cents=(n%
 const text=(id,value)=>{el(id).textContent=value};
 if(report.demo)el('demo').style.display='block';
 if(report.as_of)text('updated','Updated '+new Date(Number(report.as_of)*1000).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'UTC'})+' UTC');
-if(report.budget){text('assets',amount(report.funding_assets,6));text('balance',amount(report.proceeds_balance,18));text('spent',amount(report.spent,6)+' of '+amount(report.budget,6)+' USDC spent · yvUSDC-1');el('progress').style.width=Math.min(100,Number(big(report.spent)*10000n/big(report.budget))/100)+'%';text('retained',amount(report.totals?.retained,18)+' retained · '+amount(report.withdrawn_crvusd,18)+' withdrawn');text('returned',amount(big(report.totals?.output)-big(report.totals?.retained),18)+' crvUSD returned to Vyper');}
+if(report.budget){text('assets',amount(report.funding_assets,6));text('balance',amount(report.proceeds_balance,6));text('spent',amount(report.spent,6)+' of '+amount(report.budget,6)+' USDC spent · yvUSDC-1');el('progress').style.width=Math.min(100,Number(big(report.spent)*10000n/big(report.budget))/100)+'%';text('yearn',amount(report.totals?.yearn,6)+' earned · '+amount(report.forwarded_usdc,6)+' forwarded · '+amount(report.withdrawn_usdc,6)+' withdrawn');text('returned',amount(big(report.totals?.output)-big(report.totals?.yearn),6)+' USDC returned to Vyper');}
+if(/^0x[0-9a-fA-F]{40}$/.test(report.yearn_receiver??'')&&report.yearn_receiver.toLowerCase()!==report.proceeds?.toLowerCase()){text('destination','Future proceeds → ');const a=document.createElement('a');a.href='https://etherscan.io/address/'+report.yearn_receiver;a.textContent=report.yearn_receiver.slice(0,6)+'…'+report.yearn_receiver.slice(-4);el('destination').append(a)}
 for(const warning of report.warnings??[]){const p=document.createElement('p');p.className='notice';p.textContent=warning;el('notices').append(p)}
-for(const row of report.weeks??[]){const tr=document.createElement('tr'),date=new Date(Number(row.week)*1000).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}),share=row.ready?amount(big(row.share)*10000n/10n**18n,2)+'%':big(row.paid)===0n?'0.00%':'—';for(const value of [date,amount(row.paid,6),share,amount(row.retained,18)]){const td=document.createElement('td');td.textContent=value;tr.append(td)}const status=document.createElement('small');status.textContent=row.status??'';tr.firstChild.append(status);el('weeks').append(tr)}
+for(const row of report.weeks??[]){const tr=document.createElement('tr'),date=new Date(Number(row.week)*1000).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}),share=row.ready?amount(big(row.share)*10000n/10n**18n,2)+'%':big(row.paid)===0n?'0.00%':'—';for(const value of [date,amount(row.paid,6),share,amount(row.yearn,6)]){const td=document.createElement('td');td.textContent=value;tr.append(td)}const status=document.createElement('small');status.textContent=row.status??'';tr.firstChild.append(status);el('weeks').append(tr)}
 el('empty').hidden=(report.weeks??[]).length>0;
 for(const [key,label] of [['funding','Funding contract'],['proceeds','Proceeds contract']]){if(/^0x[0-9a-fA-F]{40}$/.test(report[key]??'')){const a=document.createElement('a');a.href='https://etherscan.io/address/'+report[key];a.textContent=label;el('links').append(a)}}
 </script>

@@ -30,6 +30,10 @@ interface Pool:
     def get_dy(i: uint256, j: uint256, amount: uint256) -> uint256: view
     def exchange(i: uint256, j: uint256, amount: uint256, min_out: uint256) -> uint256: nonpayable
 
+interface StablePool:
+    def get_dy(i: int128, j: int128, amount: uint256) -> uint256: view
+    def exchange(i: int128, j: int128, amount: uint256, min_out: uint256) -> uint256: nonpayable
+
 struct Week:
     ready: bool
     share: uint256
@@ -42,8 +46,11 @@ event Snapshot:
 event Sold:
     week: indexed(uint256)
     crv: uint256
-    crvusd: uint256
+    usdc: uint256
     yearn: uint256
+    yearn_receiver: address
+event YearnReceiverSet:
+    receiver: address
 event KeeperSet:
     account: indexed(address)
     enabled: bool
@@ -58,11 +65,13 @@ SCALE: constant(uint256) = 10**18
 MANAGER: public(constant(address)) = 0x4444AAAACDBa5580282365e25b16309Bd770ce4a
 CRV: public(constant(address)) = 0xD533a949740bb3306d119CC777fa900bA034cd52
 CRVUSD: public(constant(address)) = 0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E
+USDC: public(constant(address)) = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 GAUGE: public(constant(address)) = 0x3b8EFAa0A1Fca3d31144002f6D9c7412B967E0b4
 CONTROLLER: public(constant(address)) = 0x2F50D538606Fa9EDD2B11E2446BEb18C9D5846bB
 MINTER: public(constant(address)) = 0xd061D61a4d941c39E5453435B6345Dc261C2fcE0
 VOTER: public(constant(address)) = 0xF147b8125d2ef93FB6965Db97D6746952a133934
 POOL: public(constant(address)) = 0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14
+STABLE_POOL: public(constant(address)) = 0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E
 FUNDING: public(immutable(address))
 START: public(immutable(uint256))
 END: public(immutable(uint256))
@@ -71,6 +80,7 @@ RECEIVER: public(immutable(address))
 weeks: public(HashMap[uint256, Week])
 keepers: public(HashMap[address, bool])
 paused: public(bool)
+yearn_receiver: public(address)
 
 @deploy
 def __init__(funding: address):
@@ -80,7 +90,9 @@ def __init__(funding: address):
     assert block.timestamp < START, "start"
     RECEIVER = staticcall Gauge(GAUGE).receiver()
     assert RECEIVER != empty(address), "receiver"
+    self.yearn_receiver = self
     assert extcall Token(CRV).approve(POOL, max_value(uint256)), "approve"
+    assert extcall Token(CRVUSD).approve(STABLE_POOL, max_value(uint256)), "approve"
 
 @internal
 def _snapshot(week: uint256, yearn: uint256, manual: bool):
@@ -124,7 +136,10 @@ def claimable() -> uint256:
 @external
 @view
 def quote(amount: uint256) -> uint256:
-    return staticcall Pool(POOL).get_dy(2, 0, amount) if amount > 0 else 0
+    if amount == 0:
+        return 0
+    intermediate: uint256 = staticcall Pool(POOL).get_dy(2, 0, amount)
+    return staticcall StablePool(STABLE_POOL).get_dy(1, 0, intermediate) if intermediate > 0 else 0
 
 @external
 @nonreentrant
@@ -137,12 +152,23 @@ def sell(min_out: uint256):
     amount: uint256 = staticcall Token(CRV).balanceOf(RECEIVER) - before
     assert amount > 0, "nothing minted"
     assert extcall Token(CRV).transferFrom(RECEIVER, self, amount), "pull"
-    before = staticcall Token(CRVUSD).balanceOf(self)
-    extcall Pool(POOL).exchange(2, 0, amount, min_out)
-    output: uint256 = staticcall Token(CRVUSD).balanceOf(self) - before
-    retained: uint256 = output * share // SCALE
-    assert extcall Token(CRVUSD).transfer(RECEIVER, output - retained), "return"
-    log Sold(week=week, crv=amount, crvusd=output, yearn=retained)
+    before = staticcall Token(USDC).balanceOf(self)
+    intermediate: uint256 = extcall Pool(POOL).exchange(2, 0, amount, 0)
+    extcall StablePool(STABLE_POOL).exchange(1, 0, intermediate, min_out)
+    output: uint256 = staticcall Token(USDC).balanceOf(self) - before
+    yearn: uint256 = output * share // SCALE
+    receiver: address = self.yearn_receiver
+    if yearn > 0 and receiver != self:
+        assert extcall Token(USDC).transfer(receiver, yearn), "forward"
+    if output > yearn:
+        assert extcall Token(USDC).transfer(RECEIVER, output - yearn), "return"
+    log Sold(week=week, crv=amount, usdc=output, yearn=yearn, yearn_receiver=receiver)
+
+@external
+def set_yearn_receiver(receiver: address):
+    assert msg.sender == MANAGER and receiver != empty(address), "manager address"
+    self.yearn_receiver = receiver
+    log YearnReceiverSet(receiver=receiver)
 
 @external
 def set_keeper(account: address, enabled: bool):

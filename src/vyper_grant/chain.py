@@ -4,12 +4,12 @@ from web3 import Web3
 from .core import ADDRESSES, BUDGET, WEEK, artifact, contract, named
 
 
-def verify(client, c, block="latest"):
-    if any(
-        c.get(k) is None for k in ["funding", "proceeds", "payee", "start", "weeks"]
-    ):
-        raise ValueError("Configure both contracts, payee, start and weeks first")
-    contracts = {n: contract(client, n, c.get(n)) for n in ["funding", "proceeds"]}
+def verify(client, c, block="latest", names=("funding", "proceeds")):
+    if any(c.get(k) is None for k in {*names, "funding", "payee", "start", "weeks"}):
+        raise ValueError(
+            "Configure the required contracts, payee, start and weeks first"
+        )
+    contracts = {n: contract(client, n, c.get(n)) for n in names}
     expected = {
         "funding": {
             "PAYEE": c["payee"],
@@ -32,7 +32,7 @@ def verify(client, c, block="latest"):
         for getter, value in expected[name].items():
             if instance.functions[getter]().call(block_identifier=block) != value:
                 raise ValueError(f"Unexpected {name} {getter}")
-    return contracts["funding"], contracts["proceeds"]
+    return tuple(contracts[n] for n in names)
 
 
 def logs(client, event, start, end):
@@ -90,20 +90,23 @@ def report(client, c):
             paid=a["usdc"],
             sold=0,
             output=0,
-            retained=0,
+            yearn=0,
             purchase_tx=Web3.to_hex(event["transactionHash"]),
         )
+    forwarded = 0
     for event in events(proceeds.events.Sold()):
         a = event["args"]
         rows.setdefault(
-            a["week"], dict(week=a["week"], paid=0, sold=0, output=0, retained=0)
+            a["week"], dict(week=a["week"], paid=0, sold=0, output=0, yearn=0)
         )
-        if a["yearn"] > a["crvusd"]:
+        if a["yearn_receiver"] != proceeds.address:
+            forwarded += a["yearn"]
+        if a["yearn"] > a["usdc"]:
             raise ValueError("Sale conservation mismatch")
         for key, field in [
             ("sold", "crv"),
-            ("output", "crvusd"),
-            ("retained", "yearn"),
+            ("output", "usdc"),
+            ("yearn", "yearn"),
         ]:
             rows[a["week"]][key] += a[field]
     spent = read(funding.functions.spent())
@@ -135,22 +138,24 @@ def report(client, c):
         block_hash=Web3.to_hex(final["hash"]),
         funding=funding.address,
         proceeds=proceeds.address,
+        yearn_receiver=read(proceeds.functions.yearn_receiver()),
+        forwarded_usdc=forwarded,
         budget=BUDGET,
         spent=spent,
         funding_assets=read(funding.functions.assets()),
         proceeds_balance=read(
-            contract(client, "token", ADDRESSES["crvusd"]).functions.balanceOf(
+            contract(client, "token", ADDRESSES["usdc"]).functions.balanceOf(
                 proceeds.address
             )
         ),
         totals={
-            k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "retained"]
+            k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "yearn"]
         },
         weeks=sorted(rows.values(), key=lambda r: r["week"]),
-        withdrawn_crvusd=sum(
+        withdrawn_usdc=sum(
             e["args"]["amount"]
             for e in events(proceeds.events.Recovered())
-            if e["args"]["token"] == ADDRESSES["crvusd"]
+            if e["args"]["token"] == ADDRESSES["usdc"]
         ),
         warnings=list(dict.fromkeys(warnings)),
     )

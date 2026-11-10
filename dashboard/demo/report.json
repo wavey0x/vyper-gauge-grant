@@ -4,37 +4,38 @@
   "budget": "100000000000",
   "spent": "12000000000",
   "funding_assets": "88420000000",
-  "proceeds_balance": "15600000000000000000000",
-  "withdrawn_crvusd": "0",
+  "proceeds_balance": "15600000000",
   "totals": {
-    "output": "26000000000000000000000",
-    "retained": "15600000000000000000000"
+    "output": "26000000000",
+    "yearn": "15600000000"
   },
   "weeks": [
     {
       "week": "1792627200",
       "paid": "4000000000",
       "ready": true,
-      "retained": "5300000000000000000000",
       "status": "Closed",
-      "share": "600000000000000000"
+      "share": "600000000000000000",
+      "yearn": "5300000000"
     },
     {
       "week": "1793232000",
       "paid": "4000000000",
       "ready": true,
-      "retained": "6100000000000000000000",
       "status": "Closed",
-      "share": "600000000000000000"
+      "share": "600000000000000000",
+      "yearn": "6100000000"
     },
     {
       "week": "1793836800",
       "paid": "4000000000",
       "ready": true,
-      "retained": "4200000000000000000000",
       "status": "Active",
-      "share": "600000000000000000"
+      "share": "600000000000000000",
+      "yearn": "4200000000"
     }
   ],
-  "warnings": []
+  "warnings": [],
+  "withdrawn_usdc": "0",
+  "forwarded_usdc": "0"
 }

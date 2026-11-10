@@ -24,7 +24,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         vault = attach("vault", A["vault"])
         usdc = attach("token", A["usdc"])
         crv = attach("token", A["crv"])
-        usd = attach("token", A["crvusd"])
+        intermediate = attach("token", A["crvusd"])
         gauge = attach("gauge", A["gauge"])
         minter = attach("minter", A["minter"])
         ctrl_abi = abi("controller") + [
@@ -96,25 +96,40 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             escrow.set_keeper(keeper, True)
         assert usdc.balanceOf(payee) == 4000 * 10**6
         assert funding.spent() == 4000 * 10**6
+        with boa.env.anchor(), boa.env.prank(A["governance"]):
+            shares = vault.balanceOf(funding.address)
+            before = vault.balanceOf(A["governance"])
+            funding.recover(A["vault"], shares)
+            assert vault.balanceOf(A["governance"]) == before + shares
+            assert vault.balanceOf(funding.address) == 0
+            assert funding.spent() == 4000 * 10**6
 
         def sell():
             with boa.env.anchor():
                 amount = escrow.claimable()
                 output = escrow.quote(amount)
             before_crv = crv.balanceOf(A["receiver"])
-            before_usd = usd.balanceOf(A["receiver"])
-            before_held = usd.balanceOf(escrow.address)
+            before_usd = usdc.balanceOf(A["receiver"])
+            before_held = usdc.balanceOf(escrow.address)
+            destination = escrow.yearn_receiver()
+            before_destination = usdc.balanceOf(destination)
+            before_intermediate = intermediate.balanceOf(escrow.address)
             with boa.env.prank(keeper):
                 escrow.sell(output * 995 // 1000)
             event = escrow.get_logs(include_child_logs=False)[-1]
-            assert event.crv == amount and event.crvusd == output
+            assert event.crv == amount and event.usdc == output
             assert crv.balanceOf(A["receiver"]) == before_crv
             assert crv.balanceOf(escrow.address) == 0
             assert gauge.integrate_fraction(A["receiver"]) == minter.minted(
                 A["receiver"], A["gauge"]
             )
-            assert usd.balanceOf(escrow.address) - before_held == event.yearn
-            assert usd.balanceOf(A["receiver"]) - before_usd == output - event.yearn
+            assert event.yearn_receiver == destination
+            assert usdc.balanceOf(destination) - before_destination == event.yearn
+            assert usdc.balanceOf(escrow.address) - before_held == (
+                event.yearn if destination == escrow.address else 0
+            )
+            assert intermediate.balanceOf(escrow.address) == before_intermediate
+            assert usdc.balanceOf(A["receiver"]) - before_usd == output - event.yearn
             return event
 
         # Start clean, leaving all existing CRV untouched and returning pre-start USD.
@@ -125,16 +140,20 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         first = sell()
         share = escrow.weeks(start).share
         assert 0 < share < 10**18
-        assert first.week == start and first.yearn == first.crvusd * share // 10**18
+        assert first.week == start and first.yearn == first.usdc * share // 10**18
         with boa.env.anchor():
             assert escrow.claimable() == 0
 
+        with boa.env.prank(A["manager"]):
+            escrow.set_yearn_receiver(payee)
         boa.env.time_travel(seconds=start + WEEK - 180 - boa.env.evm.patch.timestamp)
         assert sell().week == start
+        with boa.env.prank(A["manager"]):
+            escrow.set_yearn_receiver(escrow.address)
         boa.env.time_travel(seconds=240)
         tail = sell()
         assert tail.week == start + WEEK
-        assert tail.yearn == tail.crvusd * escrow.weeks(start + WEEK).share // 10**18
+        assert tail.yearn == tail.usdc * escrow.weeks(start + WEEK).share // 10**18
 
         # Checkpoint before replacing Yearn's vote, after the real ten-day delay.
         boa.env.time_travel(

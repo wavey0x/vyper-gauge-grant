@@ -40,7 +40,7 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
                 action = {
                     "status": "sale",
                     "crv": str(amount),
-                    "min_crvusd": str(minimum),
+                    "min_usdc": str(minimum),
                 }
             elif not snapshot_due:
                 return {"status": "below minimum"}

@@ -17,12 +17,14 @@ event Purchased:
 event Recovered:
     token: indexed(address)
     amount: uint256
+    receiver: address
 
 WEEK: constant(uint256) = 604800
 BUDGET: public(constant(uint256)) = 100_000 * 10**6
 VAULT: public(constant(address)) = 0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204
 USDC: public(constant(address)) = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 MANAGER: public(constant(address)) = 0x4444AAAACDBa5580282365e25b16309Bd770ce4a
+GOVERNANCE: public(constant(address)) = 0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52
 PAYEE: public(immutable(address))
 START: public(immutable(uint256))
 END: public(immutable(uint256))
@@ -65,6 +67,6 @@ def purchase(week: uint256, amount: uint256):
 @external
 @nonreentrant
 def recover(token: address, amount: uint256):
-    assert msg.sender == MANAGER, "manager"
-    assert extcall Token(token).transfer(MANAGER, amount, default_return_value=True), "transfer"
-    log Recovered(token=token, amount=amount)
+    assert msg.sender == MANAGER or msg.sender == GOVERNANCE, "management"
+    assert extcall Token(token).transfer(msg.sender, amount, default_return_value=True), "transfer"
+    log Recovered(token=token, amount=amount, receiver=msg.sender)
