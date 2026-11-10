@@ -143,9 +143,11 @@ def quote(amount: uint256) -> uint256:
 
 @external
 @nonreentrant
-def sell(min_out: uint256):
+def sell(min_out: uint256, expected_week: uint256, quoted_crv: uint256):
     assert self.keepers[msg.sender] and not self.paused, "keeper or paused"
+    assert quoted_crv > 0, "quote"
     week: uint256 = block.timestamp // WEEK * WEEK
+    assert week == expected_week, "stale week"
     share: uint256 = self._checkpoint(week)
     before: uint256 = staticcall Token(CRV).balanceOf(RECEIVER)
     extcall Minter(MINTER).mint_for(GAUGE, RECEIVER)
@@ -154,7 +156,7 @@ def sell(min_out: uint256):
     assert extcall Token(CRV).transferFrom(RECEIVER, self, amount), "pull"
     before = staticcall Token(USDC).balanceOf(self)
     intermediate: uint256 = extcall Pool(POOL).exchange(2, 0, amount, 0)
-    extcall StablePool(STABLE_POOL).exchange(1, 0, intermediate, min_out)
+    extcall StablePool(STABLE_POOL).exchange(1, 0, intermediate, min_out * amount // quoted_crv)
     output: uint256 = staticcall Token(USDC).balanceOf(self) - before
     yearn: uint256 = output * share // SCALE
     receiver: address = self.yearn_receiver

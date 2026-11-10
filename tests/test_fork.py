@@ -20,7 +20,8 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
     with boa.fork(
         os.environ["ETHEREUM_RPC_URL"], block_identifier=BLOCK, allow_dirty=True
     ):
-        attach = lambda name, addr: boa.loads_abi(json.dumps(abi(name))).at(addr)
+        def attach(name, addr):
+            return boa.loads_abi(json.dumps(abi(name))).at(addr)
         vault = attach("vault", A["vault"])
         usdc = attach("token", A["usdc"])
         crv = attach("token", A["crv"])
@@ -74,8 +75,9 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         )
         holder = "0x55FE002aefF02F77364de339a1292923A15844B8"
         with boa.env.prank(holder):
+            usdc.transfer(funding.address, 100 * 10**6)
             usdc.approve(A["vault"], 100_000 * 10**6)
-            vault.deposit(100_000 * 10**6, funding.address)
+            vault.deposit(99_900 * 10**6, funding.address)
         assert funding.assets() >= 100_000 * 10**6 - 1
         with boa.env.prank(A["receiver"]):
             minter.mint(A["gauge"])
@@ -95,6 +97,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
                 funding.purchase(start + i * WEEK, 1000 * 10**6)
             escrow.set_keeper(keeper, True)
         assert usdc.balanceOf(payee) == 4000 * 10**6
+        assert usdc.balanceOf(funding.address) == 0
         assert funding.spent() == 4000 * 10**6
         with boa.env.anchor(), boa.env.prank(A["governance"]):
             shares = vault.balanceOf(funding.address)
@@ -115,7 +118,11 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             before_destination = usdc.balanceOf(destination)
             before_intermediate = intermediate.balanceOf(escrow.address)
             with boa.env.prank(keeper):
-                escrow.sell(output * 995 // 1000)
+                escrow.sell(
+                    output * 995 // 1000,
+                    boa.env.evm.patch.timestamp // WEEK * WEEK,
+                    amount,
+                )
             event = escrow.get_logs(include_child_logs=False)[-1]
             assert event.crv == amount and event.usdc == output
             assert crv.balanceOf(A["receiver"]) == before_crv

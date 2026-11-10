@@ -78,8 +78,11 @@ def report(client, c):
     if c.get("deployment_block") is None or not 0 <= c["deployment_block"] <= block:
         raise ValueError("A finalized deployment_block is required")
     funding, proceeds = [contract(client, n, c[n]) for n in ["funding", "proceeds"]]
-    read = lambda fn: fn.call(block_identifier=block)
-    events = lambda event: logs(client, event, c["deployment_block"], block)
+    def read(fn):
+        return fn.call(block_identifier=block)
+
+    def events(event):
+        return logs(client, event, c["deployment_block"], block)
     rows = {}
     for event in events(funding.events.Purchased()):
         a = event["args"]

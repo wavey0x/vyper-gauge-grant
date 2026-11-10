@@ -20,7 +20,8 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
         f = escrow.functions
         head = client.eth.get_block("latest")
         now, block = head["timestamp"], head["number"]
-        read = lambda fn: fn.call(block_identifier=block)
+        def read(fn):
+            return fn.call(block_identifier=block)
         week = now // WEEK * WEEK
         current = named(f.weeks(week), block)
         snapshot_due = read(funding.functions.paid(week)) > 0 and not current["ready"]
@@ -36,10 +37,11 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
             output = read(f.quote(amount))
             minimum = output * (10000 - c["slippage_bps"]) // 10000
             if minimum > 0 and (closing or amount >= units(c["min_trade_crv"])):
-                fn = f.sell(minimum)
+                fn = f.sell(minimum, week, amount)
                 action = {
                     "status": "sale",
                     "crv": str(amount),
+                    "week": week,
                     "min_usdc": str(minimum),
                 }
             elif not snapshot_due:

@@ -22,7 +22,11 @@ def preview(s):
 def sale(s):
     amount, output = preview(s)
     with boa.env.prank(s.keeper):
-        s.escrow.sell(output * 99 // 100)
+        s.escrow.sell(
+            output * 99 // 100,
+            boa.env.evm.patch.timestamp // WEEK * WEEK,
+            amount,
+        )
     return amount, output
 
 
@@ -69,6 +73,35 @@ def test_failed_withdrawal_does_not_spend_budget(system):
     assert s.funding.spent() == s.funding.paid(s.start) == 0
 
 
+def test_funding_spends_liquid_usdc_then_vault_shares(system):
+    s = system
+    s.usdc.mint(s.funding.address, 100 * 10**6)
+    assert s.funding.assets() == 100_100 * 10**6
+    shares = s.vault.balanceOf(s.funding.address)
+    with boa.env.prank(s.manager):
+        s.funding.purchase(s.start, 60 * 10**6)
+    assert s.usdc.balanceOf(s.payee) == 60 * 10**6
+    assert s.usdc.balanceOf(s.funding.address) == 40 * 10**6
+    assert s.vault.balanceOf(s.funding.address) == shares
+    with boa.env.prank(s.manager):
+        s.funding.purchase(s.start + WEEK, 100 * 10**6)
+    assert s.usdc.balanceOf(s.payee) == 160 * 10**6
+    assert s.usdc.balanceOf(s.funding.address) == 0
+    assert s.vault.balanceOf(s.funding.address) == shares - 60 * 10**6
+    assert s.funding.spent() == 160 * 10**6
+
+
+def test_failed_partial_vault_withdrawal_rolls_back_liquid_payment(system):
+    s = system
+    s.usdc.mint(s.funding.address, 25 * 10**6)
+    s.vault.configure(UNIT, True)
+    with boa.env.prank(s.manager), boa.reverts("withdrawal"):
+        s.funding.purchase(s.start, 100 * 10**6)
+    assert s.usdc.balanceOf(s.payee) == 0
+    assert s.usdc.balanceOf(s.funding.address) == 25 * 10**6
+    assert s.funding.paid(s.start) == s.funding.spent() == 0
+
+
 def test_purchase_permissions_and_unique_future_weeks(system):
     s = system
     with boa.env.prank(s.stranger), boa.reverts("manager"):
@@ -108,7 +141,7 @@ def test_full_claim_autocaptures_and_preserves_existing_balances(system):
     assert s.usdc.balanceOf(s.receiver) - before_returned == output - output // 4
     assert preview(s) == (0, 0)
     with boa.env.prank(s.keeper), boa.reverts("nothing minted"):
-        s.escrow.sell(0)
+        s.escrow.sell(0, s.start, 1)
 
 
 def test_public_checkpoint_captures_boundary_without_claiming_while_paused(system):
@@ -124,7 +157,7 @@ def test_public_checkpoint_captures_boundary_without_claiming_while_paused(syste
     advance(s.start + 3600)
     assert s.escrow.checkpoint() == UNIT // 4
     with boa.env.prank(s.keeper), boa.reverts("keeper or paused"):
-        s.escrow.sell(0)
+        s.escrow.sell(0, s.start, 1)
 
 
 def test_boundary_tail_uses_new_week_share(system):
@@ -206,9 +239,11 @@ def test_failed_sale_rolls_back_snapshot_claim_and_transfers(system, failure):
     minted = s.minter.minted(s.receiver, s.gauge.address)
     accrued = s.gauge.integrate_fraction(s.receiver)
     balances = (s.crv.balanceOf(s.receiver), s.usdc.balanceOf(s.receiver))
-    _, output = preview(s)
+    amount, output = preview(s)
     with boa.env.prank(s.keeper), boa.reverts():
-        s.escrow.sell(output + 1 if failure == "slippage" else output)
+        s.escrow.sell(
+            output + 1 if failure == "slippage" else output, s.start, amount
+        )
     assert not s.escrow.weeks(s.start).ready
     assert s.minter.minted(s.receiver, s.gauge.address) == minted
     assert s.gauge.integrate_fraction(s.receiver) == accrued
@@ -345,11 +380,34 @@ def test_only_authorized_keepers_sell(system):
     s = system
     begin(s)
     with boa.env.prank(s.stranger), boa.reverts("keeper or paused"):
-        s.escrow.sell(0)
+        s.escrow.sell(0, s.start, 1)
     with boa.env.prank(s.manager):
         s.escrow.set_keeper(s.keeper, False)
     with boa.env.prank(s.keeper), boa.reverts("keeper or paused"):
-        s.escrow.sell(0)
+        s.escrow.sell(0, s.start, 1)
+
+
+def test_delayed_sale_checks_week_and_scales_floor_for_grown_claim(system):
+    s = system
+    begin(s, 2)
+    amount, output = preview(s)
+    minted = s.minter.minted(s.receiver, s.gauge.address)
+    advance(s.start + 7200)
+    s.stable_pool.configure(9000)
+    with boa.env.prank(s.keeper), boa.reverts("slippage"):
+        s.escrow.sell(output, s.start, amount)
+    assert s.minter.minted(s.receiver, s.gauge.address) == minted
+    assert not s.escrow.weeks(s.start).ready
+    s.stable_pool.configure(10000)
+    with boa.env.prank(s.keeper):
+        s.escrow.sell(output, s.start, amount)
+    assert s.escrow.get_logs()[-1].crv > amount
+    minted = s.minter.minted(s.receiver, s.gauge.address)
+    advance(s.start + WEEK + 60)
+    with boa.env.prank(s.keeper), boa.reverts("stale week"):
+        s.escrow.sell(output, s.start, amount)
+    assert s.minter.minted(s.receiver, s.gauge.address) == minted
+    assert not s.escrow.weeks(s.start + WEEK).ready
 
 
 def test_manager_recovers_any_token_while_paused(system):

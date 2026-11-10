@@ -1,5 +1,5 @@
 # pragma version ==0.4.3
-"""A fixed USDC budget held as yvUSDC-1. One exact payment per future week."""
+"""A fixed USDC budget held as USDC or yvUSDC-1. One payment per future week."""
 
 interface Token:
     def balanceOf(account: address) -> uint256: view
@@ -43,7 +43,7 @@ def __init__(payee: address, start: uint256, weeks: uint256):
 @external
 @view
 def assets() -> uint256:
-    return staticcall Vault(VAULT).convertToAssets(staticcall Token(VAULT).balanceOf(self))
+    return staticcall Token(USDC).balanceOf(self) + staticcall Vault(VAULT).convertToAssets(staticcall Token(VAULT).balanceOf(self))
 
 @external
 @view
@@ -60,7 +60,12 @@ def purchase(week: uint256, amount: uint256):
     self.paid[week] = amount
     self.spent += amount
     before: uint256 = staticcall Token(USDC).balanceOf(PAYEE)
-    shares: uint256 = extcall Vault(VAULT).withdraw(amount, PAYEE, self, 0)
+    liquid: uint256 = min(amount, staticcall Token(USDC).balanceOf(self))
+    if liquid > 0:
+        assert extcall Token(USDC).transfer(PAYEE, liquid), "transfer"
+    shares: uint256 = 0
+    if liquid < amount:
+        shares = extcall Vault(VAULT).withdraw(amount - liquid, PAYEE, self, 0)
     assert staticcall Token(USDC).balanceOf(PAYEE) - before == amount, "payment"
     log Purchased(week=week, usdc=amount, shares=shares)
 
