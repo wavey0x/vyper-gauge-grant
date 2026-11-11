@@ -11,7 +11,7 @@ from web3 import Web3
 ROOT = Path(__file__).resolve().parents[2]
 if not (ROOT / "contracts/FundingEscrow.vy").exists():
     ROOT = Path(__file__).resolve().parent / "assets"
-WEEK, BUDGET = 604800, 100_000 * 10**6
+WEEK = 604800
 ADDRESSES = {
     "manager": "0x4444AAAACDBa5580282365e25b16309Bd770ce4a",
     "governance": "0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52",

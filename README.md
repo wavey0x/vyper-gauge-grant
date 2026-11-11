@@ -2,7 +2,7 @@
 
 Two Vyper contracts on Ethereum:
 
-- **FundingEscrow** holds USDC, yvUSDC-1 or both. `draw(amount)` pays exact USDC to its configurable recipient and automatically records the upcoming vote week. Lifetime spending cannot exceed **100,000 USDC**; yield and recovery never reset the budget.
+- **FundingEscrow** holds yvUSDC-1. `draw(amount)` withdraws the requested USDC directly to its configurable recipient and automatically records the upcoming vote week. There is no lifetime spending cap; available vault shares fund each draw.
 - **ProceedsEscrow** uses `work(min_out, expected_week, quoted_crv, max_crv)` to mint pending gauge rewards, pull only the freshly minted CRV, sell through the fixed CRV → crvUSD → **USDC** route, allocate Yearn's share, and return the rest atomically. Yearn's share accumulates here by default; management can set a receiver for future sales. The contract calculates the **transaction's UTC week** and checks it matches `expected_week`; it does not reconstruct the original earning week.
 
 The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers, the Yearn proceeds receiver, pauses sales and can recover any ERC20 to itself. **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`) can independently claw back any ERC20 held by FundingEscrow, to itself, at any time. The seller has no authority or allowance over funding. Public `checkpoint()` freezes the current funded week's vote share and remains usable while paused. Sales checkpoint automatically. There is no emissions reconstruction or unsold inventory.
@@ -42,7 +42,7 @@ uv run vyper-grant setup --allowance-crv AGREED_CRV_ALLOWANCE
 
 Deployments and manager operations prepare unsigned transactions or Safe batches. Vyper grants the CRV allowance and mint permission; Yearn enables the keeper. There is no activation transaction or historical accrual baseline. Run `doctor` at setup; ordinary keeper/report passes do not repeat full deployment verification. Ensure the pre-start closing sale succeeds before entering the first funded week.
 
-Transfer USDC and/or yvUSDC-1 shares to FundingEscrow. It spends liquid USDC first and withdraws only the shortfall from the vault. The vault is `0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204`; `previewWithdraw(100000000000)` gives the shares for 100,000 USDC at the current price. Recheck at funding time. Vault withdrawals permit zero loss. `assets()` includes both holdings; only actual weekly payments reduce `remaining()`.
+Transfer yvUSDC-1 shares to FundingEscrow. The vault is `0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204`; `previewWithdraw(amount)` gives the shares needed for a USDC amount at the current price. Each draw calls `withdraw(amount, recipient, self, 0)`, letting the vault calculate and burn the required shares with zero permitted loss. `assets()` reports the USDC value of the remaining shares, including yield. Loose USDC is not used by draws or included in that value; it can be recovered through management.
 
 ## Weekly operation
 
@@ -70,6 +70,6 @@ Use one host/signer and a shared output directory for the process lock. A pendin
 
 `set-recipient --account ADDRESS` changes the recipient of future funding draws. `set-keeper --account ADDRESS [--disable]`, `set-paused true|false`, `set-cooldown --seconds INTEGER` (at least 600), and `recover funding|proceeds --token ADDRESS --amount-raw INTEGER` cover other management. Cooldown changes apply immediately relative to the last successful sale. `set-yearn-receiver --account ADDRESS` prepares a manager batch to route future Yearn shares there. Use the proceeds contract's own address to resume accumulation. Zero is rejected; existing balances stay where they are and can be recovered separately. Grant conditions and release of held proceeds remain the manager's responsibility.
 
-`recover funding --governance --token ADDRESS --amount-raw INTEGER` prepares a **ychad.eth** clawback batch. Recover yvUSDC-1 shares directly to avoid relying on vault redemption. Recovery is independent of programme dates, the seller and the vault's withdrawal availability; it never resets spent budget or reverses payments already made. The governance address is pinned to its ENS resolution verified on November 10, 2026, not resolved dynamically by the contract.
+`recover funding --governance --token ADDRESS --amount-raw INTEGER` prepares a **ychad.eth** clawback batch. Recover yvUSDC-1 shares directly to avoid relying on vault redemption. Recovery is independent of programme dates, the seller and the vault's withdrawal availability; it does not reverse payments already made. The governance address is pinned to its ENS resolution verified on November 10, 2026, not resolved dynamically by the contract.
 
 No live deployment is recorded in this checkout. The changed ABI and bytecode require fresh deployments.

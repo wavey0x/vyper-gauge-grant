@@ -92,7 +92,6 @@ def doctor(client, c):
         result.update(
             funding_assets=str(f.functions.assets().call()),
             funding_recipient=f.functions.recipient().call(),
-            remaining_budget=str(f.functions.remaining().call()),
             paused=p.functions.paused().call(),
             cooldown=p.functions.cooldown().call(),
             can_work=p.functions.canWork().call(),

@@ -74,9 +74,8 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         )
         holder = "0x55FE002aefF02F77364de339a1292923A15844B8"
         with boa.env.prank(holder):
-            usdc.transfer(funding.address, 100 * 10**6)
             usdc.approve(A["vault"], 100_000 * 10**6)
-            vault.deposit(99_900 * 10**6, funding.address)
+            vault.deposit(100_000 * 10**6, funding.address)
         assert funding.assets() >= 100_000 * 10**6 - 1
         with boa.env.prank(A["receiver"]):
             minter.mint(A["gauge"])
@@ -98,14 +97,14 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             escrow.set_keeper(keeper, True)
         assert usdc.balanceOf(payee) == 1000 * 10**6
         assert usdc.balanceOf(funding.address) == 0
-        assert funding.spent() == 1000 * 10**6
+        assert funding.paid(start) == 1000 * 10**6
         with boa.env.anchor(), boa.env.prank(A["governance"]):
             shares = vault.balanceOf(funding.address)
             before = vault.balanceOf(A["governance"])
             funding.recover(A["vault"], shares)
             assert vault.balanceOf(A["governance"]) == before + shares
             assert vault.balanceOf(funding.address) == 0
-            assert funding.spent() == 1000 * 10**6
+            assert funding.paid(start) == 1000 * 10**6
 
         def sell():
             with boa.env.anchor():
@@ -183,7 +182,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         assert escrow.weeks(start + 2 * WEEK).ready
         with boa.env.prank(A["manager"]):
             funding.draw(1000 * 10**6)
-        assert funding.spent() == 4000 * 10**6
+        assert sum(funding.paid(start + i * WEEK) for i in range(4)) == 4000 * 10**6
 
         # The gauge enforces its own cap; there is no local cap/rate accounting.
         with boa.env.anchor():

@@ -1,7 +1,7 @@
 """Deployment verification, historical recovery, and finalized event reports."""
 
 from web3 import Web3
-from .core import ADDRESSES, BUDGET, WEEK, artifact, contract, named
+from .core import ADDRESSES, WEEK, artifact, contract, named
 
 
 def verify(client, c, block="latest", names=("funding", "proceeds")):
@@ -108,9 +108,6 @@ def report(client, c):
             ("yearn", "yearn"),
         ]:
             rows[a["week"]][key] += a[field]
-    spent = read(funding.functions.spent())
-    if sum(r["paid"] for r in rows.values()) != spent:
-        raise ValueError("Funding ledger mismatch")
     warnings = []
     for week, row in rows.items():
         row.update(named(proceeds.functions.weeks(week), block))
@@ -140,8 +137,7 @@ def report(client, c):
         proceeds=proceeds.address,
         yearn_receiver=read(proceeds.functions.yearn_receiver()),
         forwarded_usdc=forwarded,
-        budget=BUDGET,
-        spent=spent,
+        spent=sum(r["paid"] for r in rows.values()),
         funding_assets=read(funding.functions.assets()),
         proceeds_balance=read(
             contract(client, "token", ADDRESSES["usdc"]).functions.balanceOf(

@@ -154,6 +154,7 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
     data = report(s["client"], s["c"])
     assert data["spent"] == str(1000 * 10**6)
+    assert "budget" not in data
     assert int(data["totals"]["yearn"]) > 0
     assert data["proceeds_balance"] == data["totals"]["yearn"]
     s["escrow"].functions.recover(

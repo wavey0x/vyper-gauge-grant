@@ -49,57 +49,60 @@ def test_claimable_checkpoints_without_minting_and_quote_only_prices(system):
     assert s.escrow.claimable() == amount
 
 
-def test_budget_is_assets_not_shares_or_yield(system):
+def test_draw_can_use_yield_and_topups_without_a_lifetime_cap(system):
     s = system
     s.usdc.mint(s.vault.address, 10_000 * 10**6)
     s.vault.configure(11 * UNIT // 10, False)
     assert s.funding.assets() == 110_000 * 10**6
     with boa.env.prank(s.manager):
-        s.funding.draw(60_000 * 10**6)
-        s.funding.draw(40_000 * 10**6)
-        with boa.reverts("budget"):
-            s.funding.draw(1)
-        s.funding.recover(s.vault.address, s.vault.balanceOf(s.funding.address))
-    assert s.funding.spent() == 100_000 * 10**6
-    assert s.funding.remaining() == 0
-    assert s.usdc.balanceOf(s.payee) == 100_000 * 10**6
+        s.funding.draw(110_000 * 10**6)
+    assert s.vault.balanceOf(s.funding.address) == s.funding.assets() == 0
+    s.usdc.mint(s.manager, 22_000 * 10**6)
+    with boa.env.prank(s.manager):
+        s.usdc.approve(s.vault.address, 22_000 * 10**6)
+        s.vault.deposit(22_000 * 10**6, s.funding.address)
+        s.funding.draw(22_000 * 10**6)
+    assert s.funding.paid(s.start) == 132_000 * 10**6
+    assert s.usdc.balanceOf(s.payee) == 132_000 * 10**6
+    assert s.funding.assets() == 0
 
 
-def test_failed_withdrawal_does_not_spend_budget(system):
+def test_failed_withdrawal_does_not_record_payment(system):
     s = system
-    s.vault.configure(UNIT, True)
-    with boa.env.prank(s.manager), boa.reverts("withdrawal"):
-        s.funding.draw(100 * 10**6)
-    assert s.funding.spent() == s.funding.paid(s.start) == 0
-
-
-def test_funding_spends_liquid_usdc_then_vault_shares(system):
-    s = system
-    s.usdc.mint(s.funding.address, 100 * 10**6)
-    assert s.funding.assets() == 100_100 * 10**6
     shares = s.vault.balanceOf(s.funding.address)
-    with boa.env.prank(s.manager):
-        s.funding.draw(60 * 10**6)
-    assert s.usdc.balanceOf(s.payee) == 60 * 10**6
-    assert s.usdc.balanceOf(s.funding.address) == 40 * 10**6
-    assert s.vault.balanceOf(s.funding.address) == shares
-    with boa.env.prank(s.manager):
-        s.funding.draw(100 * 10**6)
-    assert s.usdc.balanceOf(s.payee) == 160 * 10**6
-    assert s.usdc.balanceOf(s.funding.address) == 0
-    assert s.vault.balanceOf(s.funding.address) == shares - 60 * 10**6
-    assert s.funding.spent() == 160 * 10**6
-
-
-def test_failed_partial_vault_withdrawal_rolls_back_liquid_payment(system):
-    s = system
-    s.usdc.mint(s.funding.address, 25 * 10**6)
     s.vault.configure(UNIT, True)
     with boa.env.prank(s.manager), boa.reverts("withdrawal"):
         s.funding.draw(100 * 10**6)
+    assert s.funding.paid(s.start) == s.usdc.balanceOf(s.payee) == 0
+    assert s.vault.balanceOf(s.funding.address) == shares
+
+
+def test_draw_withdraws_exact_usdc_and_leaves_loose_tokens_untouched(system):
+    s = system
+    s.usdc.mint(s.vault.address, 10_000 * 10**6)
+    s.vault.configure(11 * UNIT // 10, False)
+    s.usdc.mint(s.funding.address, 100 * 10**6)
+    assert s.funding.assets() == 110_000 * 10**6
+    shares = s.vault.balanceOf(s.funding.address)
+    amount = 123_456_789
+    burned = (amount * UNIT + s.vault.price() - 1) // s.vault.price()
+    with boa.env.prank(s.manager):
+        s.funding.draw(amount)
+    assert s.usdc.balanceOf(s.payee) == s.funding.paid(s.start) == amount
+    assert s.usdc.balanceOf(s.funding.address) == 100 * 10**6
+    assert s.vault.balanceOf(s.funding.address) == shares - burned
+
+
+def test_insufficient_shares_revert_even_with_loose_usdc(system):
+    s = system
+    s.usdc.mint(s.funding.address, 1000 * 10**6)
+    shares = s.vault.balanceOf(s.funding.address)
+    with boa.env.prank(s.manager), boa.reverts():
+        s.funding.draw(100_001 * 10**6)
     assert s.usdc.balanceOf(s.payee) == 0
-    assert s.usdc.balanceOf(s.funding.address) == 25 * 10**6
-    assert s.funding.paid(s.start) == s.funding.spent() == 0
+    assert s.usdc.balanceOf(s.funding.address) == 1000 * 10**6
+    assert s.vault.balanceOf(s.funding.address) == shares
+    assert s.funding.paid(s.start) == 0
 
 
 def test_draw_permissions_and_automatic_upcoming_week(system):
@@ -107,7 +110,7 @@ def test_draw_permissions_and_automatic_upcoming_week(system):
     with boa.env.prank(s.stranger), boa.reverts("manager"):
         s.funding.draw(1)
     with boa.env.prank(s.manager):
-        with boa.reverts("budget"):
+        with boa.reverts("amount"):
             s.funding.draw(0)
         s.funding.draw(1)
         s.funding.draw(2)
@@ -136,7 +139,7 @@ def test_funding_recipient_defaults_to_fee_burner_and_can_change(system):
         assert s.funding.get_logs()[-1].recipient == s.stranger
     assert s.usdc.balanceOf(s.payee) == 10 * 10**6
     assert s.usdc.balanceOf(s.stranger) == 20 * 10**6
-    assert s.funding.paid(s.start) == s.funding.spent() == 30 * 10**6
+    assert s.funding.paid(s.start) == 30 * 10**6
 
 
 def test_full_claim_autocaptures_and_preserves_existing_balances(system):
@@ -321,7 +324,7 @@ def test_governance_claws_back_funding_without_sale_or_vault_dependencies(system
         UNIT, True
     )  # Redemption can be unavailable; shares remain recoverable.
     shares = s.vault.balanceOf(s.funding.address)
-    spent = s.funding.spent()
+    paid = s.funding.paid(s.start)
     s.usdc.mint(s.funding.address, 123)
     for caller in [s.keeper, s.stranger, s.escrow.address]:
         with boa.env.prank(caller), boa.reverts("management"):
@@ -334,9 +337,7 @@ def test_governance_claws_back_funding_without_sale_or_vault_dependencies(system
         s.vault.balanceOf(s.funding.address) == s.usdc.balanceOf(s.funding.address) == 0
     )
     assert s.usdc.balanceOf(governance) == 123
-    assert (
-        s.funding.spent() == spent and s.funding.remaining() == 100_000 * 10**6 - spent
-    )
+    assert s.funding.paid(s.start) == paid
 
 
 @pytest.mark.parametrize("share", [0, 1, 3, 4])
