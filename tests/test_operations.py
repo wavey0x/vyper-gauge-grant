@@ -113,7 +113,7 @@ def begin(s):
     )
     s["tester"].time_travel(s["start"] - 180)
     quoted = s["escrow"].functions.claimable().call()
-    s["escrow"].functions.sell(
+    s["escrow"].functions.work(
         0, (s["start"] - 180) // WEEK * WEEK, quoted, quoted * 4 + 10**18
     ).transact({"from": s["keeper"]})
     s["tester"].time_travel(s["start"] + 40000)
@@ -144,7 +144,7 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     result = run(s["client"], s["c"], directory=tmp_path)
     assert result["status"] == "sale" and result["dry_run"]
     function, arguments = s["escrow"].decode_function_input(result["data"])
-    assert function.fn_name == "sell"
+    assert function.fn_name == "work"
     assert arguments["expected_week"] == s["start"]
     assert arguments["quoted_crv"] == int(result["crv"])
     assert arguments["max_crv"] == int(result["max_crv"])
@@ -152,6 +152,7 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     assert arguments["min_out"] == int(result["min_usdc"])
     assert not s["escrow"].functions.weeks(s["start"]).call()[0]
     submit(s, result)
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
     data = report(s["client"], s["c"])
     assert data["spent"] == str(1000 * 10**6)
     assert int(data["totals"]["yearn"]) > 0
@@ -211,6 +212,17 @@ def test_cli_prepares_receiver_change_and_governance_clawback(
         }
     )
     assert s["escrow"].functions.yearn_receiver().call() == s["payee"]
+    change = prepare("set-cooldown", "--seconds", "900")
+    assert change["meta"]["safeAddress"] == s["manager"]
+    s["client"].eth.send_transaction(
+        {
+            "from": s["manager"],
+            **{k: change["transactions"][0][k] for k in ["to", "data"]},
+        }
+    )
+    assert s["escrow"].functions.cooldown().call() == 900
+    with pytest.raises(SystemExit):
+        prepare("set-cooldown", "--seconds", "599")
     # Governance clawback must work without a deployed or configured seller.
     config.write_text(json.dumps({**s["c"], "proceeds": None}))
     shares = s["vault"].functions.balanceOf(s["funding"].address).call()
@@ -316,11 +328,14 @@ def test_programme_end_tail_is_sold_for_vyper_below_minimum(chain, tmp_path):
     end = s["escrow"].functions.END().call()
     s["tester"].time_travel(end - 180)
     quoted = s["escrow"].functions.claimable().call()
-    s["escrow"].functions.sell(
+    s["escrow"].functions.work(
         0, (end - 180) // WEEK * WEEK, quoted, quoted * 4 + 10**18
     ).transact({"from": s["keeper"]})
     s["c"]["min_trade_crv"] = "1000000"
     s["tester"].time_travel(end + 60)
+    s["tester"].mine_block()
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
+    s["tester"].time_travel(end + 420)
     s["tester"].mine_block()
     result = run(s["client"], s["c"], directory=tmp_path)
     assert result["status"] == "sale"
@@ -351,7 +366,7 @@ def test_uncertain_broadcast_uses_chain_state_on_next_pass(
         run(s["client"], s["c"], True, tmp_path)
     assert s["client"].eth.get_transaction_receipt(hashes[0]).status == 1
     monkeypatch.setattr(s["client"].eth, "send_raw_transaction", original)
-    assert run(s["client"], s["c"], True, tmp_path)["status"] == "below minimum"
+    assert run(s["client"], s["c"], True, tmp_path)["status"] == "cooldown"
     assert s["client"].eth.get_transaction_count(s["keeper"]) == nonce + 1
     assert not (tmp_path / "pending.json").exists()
 

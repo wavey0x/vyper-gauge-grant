@@ -1,6 +1,6 @@
 # Verification
 
-Verified November 10, 2026: **52 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent.
+Verified November 11, 2026: **53 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent.
 
 ```sh
 uv sync --extra dev
@@ -19,6 +19,8 @@ Operations tests deploy both production contracts through the Python builder wit
 
 Both contracts compile with Vyper 0.4.3 and generated ABI/bytecode matches the sources. Python static checks, shell syntax and whitespace checks pass. The built wheel includes the new ABI and dashboard template. Desktop and 390px mobile layouts were inspected; the dashboard has no horizontal overflow or JavaScript errors.
 
-FundingEscrow is **77 lines** with a **2,721-byte** runtime. Direct USDC support added no mutable state or seller dependency. ProceedsEscrow is **193 lines**, down from the earlier 275-line design, with a **6,532-byte** runtime versus 9,077. Its only mutable state is weekly captured/share records, keeper permissions, the pause flag and Yearn's receiver. No accrual baselines, inflation rates, caps, inventories, cursors or lifetime accounting totals remain. A funded share is captured once; ordinary sales need no persistent escrow accounting writes.
+Cooldown tests verify the 600-second default and hard floor, manager permissions, a shared interval across keepers, the exact eligibility boundary, and `canWork()` while paused. Failed sales leave `last_sale` unchanged. A public checkpoint can capture the new week while the cooldown is active. Operations tests verify that the keeper waits, that the final cleanup still bypasses the trade minimum after the cooldown, and that the CLI prepares a working manager cooldown update.
+
+FundingEscrow is **77 lines** with a **2,721-byte** runtime. Direct USDC support added no mutable state or seller dependency. ProceedsEscrow is **214 lines**, down from the earlier 275-line design, with a **7,099-byte** runtime versus 9,077. Its mutable state is weekly captured/share records, keeper permissions, the pause flag, Yearn's receiver, the cooldown and the last successful sale timestamp. No accrual baselines, inflation rates, caps, inventories, cursors or lifetime accounting totals remain. A funded share is captured once; ordinary sales write only the cooldown timestamp in escrow storage.
 
 These checks verify claim-week settlement, not exact earning-week attribution or compliance with the operating agreement. Closing sales are best effort, external claimers must stop, and substantial outages require reconciliation. `claimable()` uses eth_call to simulate the gauge checkpoint; `quote(amount)` is a separate view. Tests verify that quoting leaves the gauge untouched and claimable checkpoints without minting. No live deployment is recorded; fresh deployment is required. See [accounting](accounting.md) for the accepted assumptions.

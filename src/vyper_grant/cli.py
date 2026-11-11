@@ -94,6 +94,8 @@ def doctor(client, c):
             funding_assets=str(f.functions.assets().call()),
             remaining_budget=str(f.functions.remaining().call()),
             paused=p.functions.paused().call(),
+            cooldown=p.functions.cooldown().call(),
+            can_work=p.functions.canWork().call(),
             yearn_receiver=p.functions.yearn_receiver().call(),
             keeper_enabled=p.functions.keepers(c["keeper"]).call(),
             mint_enabled=contract(client, "minter")
@@ -144,6 +146,8 @@ def main():
     k = sub.add_parser("set-keeper")
     k.add_argument("--account", required=True)
     k.add_argument("--disable", action="store_true")
+    s = sub.add_parser("set-cooldown")
+    s.add_argument("--seconds", type=int, required=True)
     s = sub.add_parser("set-paused")
     s.add_argument("paused", choices=["true", "false"])
     for name in ["keeper", "checkpoint"]:
@@ -245,6 +249,10 @@ def main():
                 fn = ef.set_yearn_receiver(address(args.account))
             elif args.command == "set-keeper":
                 fn = ef.set_keeper(address(args.account), not args.disable)
+            elif args.command == "set-cooldown":
+                if args.seconds < 600:
+                    raise ValueError("Cooldown must be at least 600 seconds")
+                fn = ef.set_cooldown(args.seconds)
             elif args.command == "set-paused":
                 fn = ef.set_paused(args.paused == "true")
             fn.call({"from": sender})

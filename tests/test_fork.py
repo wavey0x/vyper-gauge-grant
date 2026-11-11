@@ -118,7 +118,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             before_destination = usdc.balanceOf(destination)
             before_intermediate = intermediate.balanceOf(escrow.address)
             with boa.env.prank(keeper):
-                escrow.sell(
+                escrow.work(
                     output * 995 // 1000,
                     boa.env.evm.patch.timestamp // WEEK * WEEK,
                     amount,
@@ -158,7 +158,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         assert sell().week == start
         with boa.env.prank(A["manager"]):
             escrow.set_yearn_receiver(escrow.address)
-        boa.env.time_travel(seconds=240)
+        boa.env.time_travel(seconds=600)
         tail = sell()
         assert tail.week == start + WEEK
         assert tail.yearn == tail.usdc * escrow.weeks(start + WEEK).share // 10**18

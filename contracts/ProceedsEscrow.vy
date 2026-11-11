@@ -54,6 +54,8 @@ event YearnReceiverSet:
 event KeeperSet:
     account: indexed(address)
     enabled: bool
+event CooldownSet:
+    seconds: uint256
 event Paused:
     paused: bool
 event Recovered:
@@ -62,6 +64,7 @@ event Recovered:
 
 WEEK: constant(uint256) = 604800
 SCALE: constant(uint256) = 10**18
+MIN_COOLDOWN: constant(uint256) = 600
 MANAGER: public(constant(address)) = 0x4444AAAACDBa5580282365e25b16309Bd770ce4a
 CRV: public(constant(address)) = 0xD533a949740bb3306d119CC777fa900bA034cd52
 CRVUSD: public(constant(address)) = 0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E
@@ -80,6 +83,8 @@ RECEIVER: public(immutable(address))
 weeks: public(HashMap[uint256, Week])
 keepers: public(HashMap[address, bool])
 paused: public(bool)
+cooldown: public(uint256)
+last_sale: public(uint256)
 yearn_receiver: public(address)
 
 @deploy
@@ -91,6 +96,7 @@ def __init__(funding: address):
     RECEIVER = staticcall Gauge(GAUGE).receiver()
     assert RECEIVER != empty(address), "receiver"
     self.yearn_receiver = self
+    self.cooldown = MIN_COOLDOWN
     assert extcall Token(CRV).approve(POOL, max_value(uint256)), "approve"
     assert extcall Token(CRVUSD).approve(STABLE_POOL, max_value(uint256)), "approve"
 
@@ -142,9 +148,16 @@ def quote(amount: uint256) -> uint256:
     return staticcall StablePool(STABLE_POOL).get_dy(1, 0, intermediate) if intermediate > 0 else 0
 
 @external
+@view
+def canWork() -> bool:
+    """Whether the unpaused contract has cleared its sale cooldown."""
+    return not self.paused and block.timestamp - self.last_sale >= self.cooldown
+
+@external
 @nonreentrant
-def sell(min_out: uint256, expected_week: uint256, quoted_crv: uint256, max_crv: uint256):
+def work(min_out: uint256, expected_week: uint256, quoted_crv: uint256, max_crv: uint256):
     assert self.keepers[msg.sender] and not self.paused, "keeper or paused"
+    assert block.timestamp - self.last_sale >= self.cooldown, "cooldown"
     assert quoted_crv > 0 and max_crv >= quoted_crv, "quote"
     week: uint256 = block.timestamp // WEEK * WEEK
     assert week == expected_week, "stale week"
@@ -165,6 +178,7 @@ def sell(min_out: uint256, expected_week: uint256, quoted_crv: uint256, max_crv:
         assert extcall Token(USDC).transfer(receiver, yearn), "forward"
     if output > yearn:
         assert extcall Token(USDC).transfer(RECEIVER, output - yearn), "return"
+    self.last_sale = block.timestamp
     log Sold(week=week, crv=amount, usdc=output, yearn=yearn, yearn_receiver=receiver)
 
 @external
@@ -178,6 +192,13 @@ def set_keeper(account: address, enabled: bool):
     assert msg.sender == MANAGER and account != empty(address), "manager address"
     self.keepers[account] = enabled
     log KeeperSet(account=account, enabled=enabled)
+
+@external
+def set_cooldown(seconds: uint256):
+    assert msg.sender == MANAGER, "manager"
+    assert seconds >= MIN_COOLDOWN, "cooldown"
+    self.cooldown = seconds
+    log CooldownSet(seconds=seconds)
 
 @external
 def set_paused(paused: bool):

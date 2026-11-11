@@ -26,12 +26,13 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
         current = named(f.weeks(week), block)
         snapshot_due = read(funding.functions.paid(week)) > 0 and not current["ready"]
         end = read(f.END())
-        closing = now % WEEK >= WEEK - 300 or end <= now < end + 300
+        closing = now % WEEK >= WEEK - 300 or end <= now < end + read(f.cooldown()) + 300
         paused = read(f.paused())
+        can_work = read(f.canWork())
         authorized = read(f.keepers(sender))
         fn = f.checkpoint()
         action = {"status": "checkpoint"}
-        if not checkpoint_only and not paused and authorized:
+        if not checkpoint_only and can_work and authorized:
             # Simulate the gauge checkpoint, then quote that amount at the same block.
             amount = read(f.claimable())
             output = read(f.quote(amount))
@@ -39,7 +40,7 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
             if minimum > 0 and (closing or amount >= units(c["min_trade_crv"])):
                 # Allow ordinary claim growth while rejecting a stale oversized sale.
                 max_crv = amount * 4 + 10**18
-                fn = f.sell(minimum, week, amount, max_crv)
+                fn = f.work(minimum, week, amount, max_crv)
                 action = {
                     "status": "sale",
                     "crv": str(amount),
@@ -52,7 +53,7 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
         elif not (checkpoint_only or snapshot_due):
             if not authorized:
                 raise ValueError("Keeper is not authorized")
-            return {"status": "paused"}
+            return {"status": "paused" if paused else "cooldown"}
         fn.call({"from": sender})
         if not send:
             return {
