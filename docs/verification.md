@@ -1,17 +1,19 @@
 # Verification
 
-Verified November 11, 2026: **85 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent. The `wavey3` deployment dry run also passed against Ethereum mainnet without unlocking the account.
+Verified November 11, 2026: **96 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent. The `wavey3` funding replacement dry run also passed against Ethereum mainnet without unlocking the account.
 
 ```sh
 uv sync --extra dev
 uv run --no-sync vyper-grant --out build build
 RUN_FORK_TESTS=1 uv run --no-sync pytest -q
-uv run --no-sync python -m vyper_grant.deploy --account wavey3 --only proceeds \
-  --config output/proceeds-v3.json --journal build/proceeds-v3.json
+uv run --no-sync python -m vyper_grant.deploy --account wavey3 --only funding \
+  --config output/funding-v2.json --journal build/funding-v2.json
 uv build
 ```
 
 ## Week boundaries
+
+Funding queues its first payment at the start of the following UTC week and its second one week later. Tests schedule at the exact boundary, one second afterward, midweek and one second before rollover. They verify no immediate payment, rejection before each boundary, exact half/remainder amounts and no third payment. Late execution preserves the original second boundary; two overdue payments require two calls. Both releases are also exercised against the real yvUSDC-1 vault on the mainnet fork.
 
 Both constructors take no arguments. Proceeds records its deployment week automatically and captures the current share if the controller's effective vote is still available. Tests cover deployment with zero Yearn votes, a subsequent vote that only applies next week, and a sale just before the boundary sending all output to Vyper. After the boundary, sales use the new week's share. There is no previous-week carryover rule or configured start/end date.
 
@@ -23,7 +25,9 @@ The mainnet fork uses real USDC and yvUSDC-1, the real Yearn voter and GaugeCont
 
 Contract tests cover exact vault withdrawals, share rounding, yield and top-ups, failure rollback, zero/partial/full Yearn shares, zero total gauge weight, public checkpointing while paused, bounded missing-weight recovery, existing token balances, unchanged absolute minimum output and the `max_crv` pull cap. Failed pulls, swaps, forwarding and returns roll back the claim and snapshot. With no existing CRV balance, missing mint permission leaves nothing to sell and also reverts. Tests drain capped leftovers after emissions stop, reject a zero cap, and verify that delayed claim growth cannot increase the amount pulled above the operator's cap. Cooldown tests cover the 600-second hard minimum, the exact eligibility boundary, shared timing across keepers and unchanged `last_sale` after failure.
 
-Five-role tests exercise every privileged entry point as manager, governance, keeper, Vyper receiver and stranger. Manager and ychad.eth can withdraw non-CRV proceeds tokens to a chosen recipient while paused. Only the Vyper multisig can withdraw CRV, including while paused; it cannot withdraw crvUSD or other tokens. Governance cannot change manager-only settings or sell unless separately authorized as a keeper. Public helpers cannot mint, transfer, change recipients or grant permissions.
+Five-role tests exercise every privileged entry point as manager, governance, keeper, Vyper receiver and stranger. Manager alone schedules funding and selects its recipient. Manager and ychad.eth can cancel funding or recover assets; vault-share recovery cancels unpaid instalments and a later top-up does not revive them. Public funding work pays only a due instalment to the configured recipient. Manager and ychad.eth can withdraw non-CRV proceeds tokens to a chosen recipient while paused. Only the Vyper multisig can withdraw CRV, including while paused; it cannot withdraw crvUSD or other tokens. Governance cannot change manager-only settings or sell unless separately authorized as a keeper. Public proceeds helpers cannot mint, transfer, change recipients or grant permissions.
+
+Funding tests cover overlapping-round rejection, cancellation before/after the first payment, recipient changes between payments, exact vault redemption and rounding, and insufficient shares or unavailable liquidity leaving a retryable payment. Loose USDC does not fund a scheduled payment, and recovering unrelated tokens does not cancel the round. Keeper and CLI tests exercise scheduling, public work without a proceeds address or keeper role, governance cancellation, and reports separating pending payments from actual spending.
 
 Retention tests cover zero/partial/full Yearn shares, integer rounding, forwarding Yearn's output, repeated calls in both modes, and retained balances after gauge exhaustion. A zero Yearn share skips the swap, requires zero minimum output and still consumes the cooldown. A later full-batch sale leaves previously retained CRV untouched. Failed forwarding rolls back minting, retention and snapshots. The mainnet fork exercises retention before and after Yearn's vote takes effect, switches back to selling, rejects CRV withdrawals by manager/governance/keeper, and verifies Vyper's withdrawal while paused.
 
@@ -31,12 +35,12 @@ Operations tests execute prepared Safe batches and keeper transactions against f
 
 ## Deployment and verification
 
-The deployment script uses the encrypted Brownie keystore through `eth_account`, prompts locally for its password and signs only the two no-argument mainnet deployments. Deployment itself grants no keeper permission. Tests use a generated test keystore and local chain; they cover a read-only dry run, both signed deployments, proceeds-only replacement while preserving funding and the original report block, saved addresses, verification-only retries and resuming an interrupted broadcast without duplicate deployment.
+The deployment script uses the encrypted Brownie keystore through `eth_account`, prompts locally for its password and signs only the two no-argument mainnet deployments. Deployment itself grants no keeper permission. Tests use a generated test keystore and local chain; they cover a read-only dry run, both signed deployments, replacement of either contract while preserving the other and the original report block, saved addresses, verification-only retries and resuming an interrupted broadcast without duplicate deployment.
 
 Before signing, the script compiles the exact Vyper standard JSON intended for Etherscan and compares its ABI, creation bytecode and runtime with the committed artifacts. The [Etherscan Vyper API](https://docs.etherscan.io/api-reference/endpoint/verifyvyper) request uses `vyper-json`, compiler `vyper:0.4.3` and empty constructor arguments. Mocked explorer tests cover indexing delays, queued verification, success, already-verified responses and rejection. Live source verification awaits deployment; the tests do not claim an Etherscan verification has already occurred.
 
 A journal records each signed transaction hash before broadcasting. Resuming uses that hash; an unresolved transaction is not automatically replaced or redeployed. Source/build changes and conflicting configured deployments are rejected. Missing `ETHERSCAN_KEY` stops the broadcast path before unlocking the account.
 
-Both contracts compile with Vyper 0.4.3. FundingEscrow is **57 lines**, with a **1,678-byte** runtime; its only mutable state is the recipient. ProceedsEscrow is **196 lines**, with a **6,480-byte** runtime; ordinary work calls write only `last_sale` in escrow storage after a week's share is captured. Retention adds no storage fields or reserve counter. Python compilation, shell syntax, whitespace checks and wheel/sdist builds pass. The contracts remain independent, and neither enforces grant milestones.
+Both contracts compile with Vyper 0.4.3. FundingEscrow is **96 lines**, with a **2,609-byte** runtime; its state is the recipient, two payment amounts and next payment week. ProceedsEscrow is unchanged at **196 lines**, with a **6,480-byte** runtime; ordinary work calls write only `last_sale` in escrow storage after a week's share is captured. Retention adds no storage fields or reserve counter. Python compilation, shell syntax, whitespace checks and wheel/sdist builds pass. The contracts remain independent, and neither enforces grant milestones.
 
-These checks validate execution-week settlement under the operating agreement, not precise earning-week attribution. Process rewards as close to the boundary as practical, respecting cooldown. Independent claimers must stop, and substantial missed claims require reconciliation. Retained CRV sent back to the gauge-receiving multisig becomes eligible for another allocation: withdraw elsewhere while automation is active. Earlier deployments remain unchanged; the new `work(min_out, max_crv, sell_vyper)` API and withdrawal permissions require a new proceeds deployment and new approvals. Funding can be reused.
+These checks validate execution-week settlement under the operating agreement, not precise earning-week attribution. Process rewards as close to the boundary as practical, respecting cooldown. Independent claimers must stop, and substantial missed claims require reconciliation. Retained CRV sent back to the gauge-receiving multisig becomes eligible for another allocation: withdraw elsewhere while automation is active. Earlier onchain deployments remain unchanged. The scheduled-payment funding API requires replacing the old immediate-draw funding escrow; this update makes no further changes to proceeds bytecode.

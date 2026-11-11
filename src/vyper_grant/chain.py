@@ -129,6 +129,8 @@ def report(client, c):
         block_hash=Web3.to_hex(final["hash"]),
         funding=funding.address,
         funding_recipient=read(funding.functions.recipient()),
+        funding_next_week=read(funding.functions.next_week()),
+        funding_payments=[read(funding.functions.payments(i)) for i in range(2)],
         proceeds=proceeds.address,
         start=start,
         yearn_receiver=read(proceeds.functions.yearn_receiver()),

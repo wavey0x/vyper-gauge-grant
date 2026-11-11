@@ -80,20 +80,23 @@ def test_interrupted_broadcast_resumes_recorded_hash(deployment_run, monkeypatch
     assert len(prompts) == 2
 
 
-def test_proceeds_only_deployment_preserves_existing_funding(deployment_run):
+@pytest.mark.parametrize("only", ["funding", "proceeds"])
+def test_single_deployment_preserves_other_contract(deployment_run, only):
     s, args, _, prompts, published = deployment_run
+    other = "proceeds" if only == "funding" else "funding"
+    contracts = {"funding": s["funding"], "proceeds": s["escrow"]}
     config = json.loads((ROOT / "config/example.json").read_text())
-    config.update(funding=s["funding"].address, deployment_block=1)
+    config.update({other: contracts[other].address, "deployment_block": 1})
     args.config.write_text(json.dumps(config))
     initial_nonce = s["client"].eth.get_transaction_count(s["deployer"])
-    args.only, args.broadcast = "proceeds", True
+    args.only, args.broadcast = only, True
     deploy.execute(args)
     saved = json.loads(args.config.read_text())
-    assert saved["funding"] == s["funding"].address
+    assert saved[other] == contracts[other].address
     assert saved["deployment_block"] == 1
-    assert saved["proceeds"] != s["escrow"].address
+    assert saved[only] != contracts[only].address
     assert len(prompts) == len(published) == 1
-    assert published[0][0] == "proceeds"
+    assert published[0][0] == only
     assert s["client"].eth.get_transaction_count(s["deployer"]) == initial_nonce + 1
 
 

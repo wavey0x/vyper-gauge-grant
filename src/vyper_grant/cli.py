@@ -84,6 +84,8 @@ def doctor(client, c):
         result.update(
             funding_assets=str(f.functions.assets().call()),
             funding_recipient=f.functions.recipient().call(),
+            funding_next_week=f.functions.next_week().call(),
+            funding_can_work=f.functions.canWork().call(),
         )
     if all(c.get(k) is not None for k in ["proceeds", "keeper"]):
         (p,) = verify(client, c, names=("proceeds",))
@@ -119,9 +121,11 @@ def main():
     d.add_argument("--deployer", required=True)
     s = sub.add_parser("setup")
     s.add_argument("--allowance-crv", required=True)
-    f = sub.add_parser("draw")
+    f = sub.add_parser("fund-round")
     f.add_argument("--usdc", required=True)
     f.add_argument("--reference", help="Human-readable Safe description")
+    f = sub.add_parser("cancel-round")
+    f.add_argument("--governance", action="store_true", help="Cancel funding as ychad.eth")
     s = sub.add_parser("set-missing-weight")
     s.add_argument("--week", type=int, required=True)
     r = sub.add_parser("recover")
@@ -151,7 +155,7 @@ def main():
     s.add_argument("--seconds", type=int, required=True)
     s = sub.add_parser("set-paused")
     s.add_argument("paused", choices=["true", "false"])
-    for name in ["keeper", "checkpoint"]:
+    for name in ["keeper", "checkpoint", "funding-keeper"]:
         k = sub.add_parser(name)
         k.add_argument("--send", action="store_true")
     r = sub.add_parser("report")
@@ -183,7 +187,7 @@ def main():
             atomic_json(out / "setup-manager.safe.json", manager)
             print("Prepared Vyper and manager setup batches")
             return
-        elif args.command in ["keeper", "checkpoint"]:
+        elif args.command in ["keeper", "checkpoint", "funding-keeper"]:
             from .keeper import run
 
             print(
@@ -194,13 +198,14 @@ def main():
                         args.send,
                         out / "keeper",
                         checkpoint_only=args.command == "checkpoint",
+                        funding_only=args.command == "funding-keeper",
                     ),
                     indent=2,
                 )
             )
             return
         else:
-            funding_only = args.command in ["draw", "set-recipient", "recover"]
+            funding_only = args.command in ["fund-round", "cancel-round", "set-recipient", "recover"]
             if funding_only:
                 (funding,) = verify(client, c, names=("funding",))
             else:
@@ -214,10 +219,14 @@ def main():
                 block = client.eth.block_number
                 print(json.dumps(serialize(quote_work(escrow, c, block))))
                 return
-            if args.command == "draw":
-                fn = funding.functions.draw(units(args.usdc, 6))
+            if args.command == "fund-round":
+                fn = funding.functions.fund_round(units(args.usdc, 6))
                 if args.reference:
                     meta = {"description": args.reference}
+            elif args.command == "cancel-round":
+                if args.governance:
+                    sender = A["governance"]
+                fn = funding.functions.cancel()
             elif args.command == "set-missing-weight":
                 historical = historical_vote(
                     client, args.week, client.eth.get_block("finalized")

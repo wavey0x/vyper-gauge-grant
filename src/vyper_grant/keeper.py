@@ -21,7 +21,7 @@ def quote_work(escrow, c, block):
     }
 
 
-def run(client, c, send=False, directory="output/keeper", checkpoint_only=False):
+def run(client, c, send=False, directory="output/keeper", checkpoint_only=False, funding_only=False):
     root = Path(directory)
     root.mkdir(parents=True, exist_ok=True)
     with (root / "lock").open("a") as lock:
@@ -30,43 +30,56 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
         nonce = client.eth.get_transaction_count(sender)
         if nonce != client.eth.get_transaction_count(sender, "pending"):
             return {"status": "pending nonce"}
-        escrow = contract(client, "proceeds", c["proceeds"])
-        f = escrow.functions
-        head = client.eth.get_block("latest")
-        now, block = head["timestamp"], head["number"]
-        def read(fn):
-            return fn.call(block_identifier=block)
-        week = now // WEEK * WEEK
-        current = named(f.weeks(week), block)
-        snapshot_due = not current["ready"]
-        closing = now % WEEK >= WEEK - 300
-        paused = read(f.paused())
-        can_work = read(f.canWork())
-        authorized = read(f.keepers(sender))
-        fn = f.checkpoint()
-        action = {"status": "checkpoint"}
-        if not checkpoint_only and can_work and authorized:
-            quote = quote_work(escrow, c, block)
-            amount, output = quote["crv"], quote["crvusd"]
-            minimum = output * (10000 - c["slippage_bps"]) // 10000
-            if amount > 0 and (quote["swap_crv"] == 0 or minimum > 0) and (closing or amount >= units(c["min_trade_crv"])):
-                fn = f.work(minimum, amount, quote["sell_vyper"])
-                action = {
-                    "status": "sale" if quote["swap_crv"] else "retain",
-                    "crv": str(amount),
-                    "swap_crv": str(quote["swap_crv"]),
-                    "vyper_crv": str(quote["vyper_crv"]),
-                    "sell_vyper": quote["sell_vyper"],
-                    "max_crv": str(amount),
-                    "week": week,
-                    "min_crvusd": str(minimum),
-                }
-            elif not snapshot_due:
-                return {"status": "below minimum"}
-        elif not (checkpoint_only or snapshot_due):
-            if not authorized:
-                raise ValueError("Keeper is not authorized")
-            return {"status": "paused" if paused else "cooldown"}
+        if funding_only:
+            escrow = contract(client, "funding", c["funding"])
+            f = escrow.functions
+            block = client.eth.block_number
+            if not f.canWork().call(block_identifier=block):
+                return {"status": "not due"}
+            fn = f.work()
+            action = {
+                "status": "funding payment",
+                "usdc": str(f.payments(0).call(block_identifier=block)),
+                "week": f.next_week().call(block_identifier=block),
+            }
+        else:
+            escrow = contract(client, "proceeds", c["proceeds"])
+            f = escrow.functions
+            head = client.eth.get_block("latest")
+            now, block = head["timestamp"], head["number"]
+            def read(fn):
+                return fn.call(block_identifier=block)
+            week = now // WEEK * WEEK
+            current = named(f.weeks(week), block)
+            snapshot_due = not current["ready"]
+            closing = now % WEEK >= WEEK - 300
+            paused = read(f.paused())
+            can_work = read(f.canWork())
+            authorized = read(f.keepers(sender))
+            fn = f.checkpoint()
+            action = {"status": "checkpoint"}
+            if not checkpoint_only and can_work and authorized:
+                quote = quote_work(escrow, c, block)
+                amount, output = quote["crv"], quote["crvusd"]
+                minimum = output * (10000 - c["slippage_bps"]) // 10000
+                if amount > 0 and (quote["swap_crv"] == 0 or minimum > 0) and (closing or amount >= units(c["min_trade_crv"])):
+                    fn = f.work(minimum, amount, quote["sell_vyper"])
+                    action = {
+                        "status": "sale" if quote["swap_crv"] else "retain",
+                        "crv": str(amount),
+                        "swap_crv": str(quote["swap_crv"]),
+                        "vyper_crv": str(quote["vyper_crv"]),
+                        "sell_vyper": quote["sell_vyper"],
+                        "max_crv": str(amount),
+                        "week": week,
+                        "min_crvusd": str(minimum),
+                    }
+                elif not snapshot_due:
+                    return {"status": "below minimum"}
+            elif not (checkpoint_only or snapshot_due):
+                if not authorized:
+                    raise ValueError("Keeper is not authorized")
+                return {"status": "paused" if paused else "cooldown"}
         fn.call({"from": sender})
         if not send:
             return {

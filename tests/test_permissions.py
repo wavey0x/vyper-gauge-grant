@@ -20,7 +20,8 @@ def test_privileged_entry_points_enforce_roles(system, role):
     manager = {"manager"}
     management = {"manager", "governance"}
     actions = [
-        (s.funding.draw, (1,), manager, "manager"),
+        (s.funding.fund_round, (2,), manager, "manager"),
+        (s.funding.cancel, (), management, "management"),
         (s.funding.set_recipient, (s.stranger,), manager, "manager"),
         (s.funding.recover, (s.vault.address, 1), management, "management"),
         (s.escrow.set_missing_weight, (s.start, 0), manager, "manager"),

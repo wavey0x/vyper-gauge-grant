@@ -50,5 +50,10 @@
   "forwarded_crvusd": "0",
   "withdrawn_crvusd": "0",
   "vyper_crv_balance": "2500000000000000000000",
-  "withdrawn_crv": "1000000000000000000000"
+  "withdrawn_crv": "1000000000000000000000",
+  "funding_payments": [
+    "10000000000",
+    "10000000000"
+  ],
+  "funding_next_week": "1794441600"
 }

@@ -90,9 +90,10 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         with boa.env.prank(A["manager"]):
             assert funding.recipient() == "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8"
             funding.set_recipient(payee)
-            funding.draw(1000 * 10**6)
+            funding.fund_round(2000 * 10**6)
             escrow.set_keeper(keeper, True)
-        assert usdc.balanceOf(payee) == 1000 * 10**6
+        assert usdc.balanceOf(payee) == 0
+        assert funding.next_week() == start and not funding.canWork()
         assert usdc.balanceOf(funding.address) == 0
         with boa.env.anchor(), boa.env.prank(A["governance"]):
             shares = vault.balanceOf(funding.address)
@@ -161,6 +162,11 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         boa.env.time_travel(seconds=start - 180 - boa.env.evm.patch.timestamp)
         assert sell().yearn == 0
         boa.env.time_travel(seconds=3780)
+        assert funding.canWork()
+        with boa.env.prank(keeper):
+            funding.work()
+        assert usdc.balanceOf(payee) == 1000 * 10**6
+        assert funding.next_week() == start + WEEK
         assert not escrow.weeks(start).ready
         first = sell()
         share = escrow.weeks(start).share
@@ -195,6 +201,10 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         with boa.env.prank(A["manager"]):
             escrow.set_yearn_receiver(escrow.address)
         boa.env.time_travel(seconds=600)
+        with boa.env.prank(keeper):
+            funding.work()
+        assert usdc.balanceOf(payee) == 2000 * 10**6
+        assert not funding.canWork()
         tail = sell()
         assert tail.week == start + WEEK
         assert tail.yearn == tail.crvusd * escrow.weeks(start + WEEK).share // 10**18 > 0
@@ -215,7 +225,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         assert sell().yearn == 0
         assert escrow.weeks(start + 2 * WEEK).ready
         with boa.env.prank(A["manager"]):
-            funding.draw(1000 * 10**6)
+            funding.fund_round(2000 * 10**6)
 
         # The gauge enforces its own cap; there is no local cap/rate accounting.
         with boa.env.anchor():

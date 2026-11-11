@@ -105,7 +105,7 @@ def chain(monkeypatch):
 
 
 def begin(s):
-    s["funding"].functions.draw(1000 * 10**6).transact(
+    s["funding"].functions.fund_round(2000 * 10**6).transact(
         {"from": s["manager"]}
     )
     s["tester"].time_travel(s["start"] - 180)
@@ -115,6 +115,7 @@ def begin(s):
     ).transact({"from": s["keeper"]})
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
+    s["funding"].functions.work().transact({"from": s["keeper"]})
 
 
 def submit(s, result):
@@ -246,6 +247,7 @@ def test_keeper_quotes_only_yearns_crv_and_reports_retention(chain, tmp_path, mo
 def test_keeper_can_retain_entire_batch_with_zero_yearn_share(chain, tmp_path):
     s = chain
     s["c"].update(sell_vyper=False, max_crv="100", min_trade_crv="50")
+    s["crv"].functions.mint(s["receiver"], 100 * 10**18).transact()
     s["tester"].time_travel(s["start"] - 180)
     s["tester"].mine_block()
     result = run(s["client"], s["c"], directory=tmp_path)
@@ -373,7 +375,7 @@ def test_checkpoint_retries_while_paused_and_explicit_command_is_public(
     assert explicit["status"] == "checkpoint"
 
 
-def test_draw_cli_and_report_record_each_recipient(chain, tmp_path, monkeypatch):
+def test_funding_cli_and_report_record_scheduled_payments(chain, tmp_path, monkeypatch):
     s = chain
     config = tmp_path / "config.json"
     config.write_text(json.dumps({**s["c"], "proceeds": None}))
@@ -385,18 +387,31 @@ def test_draw_cli_and_report_record_each_recipient(chain, tmp_path, monkeypatch)
         ])
         main()
         prepared = json.loads((tmp_path / (args[0] + ".json")).read_text())
-        assert prepared["meta"]["safeAddress"] == s["manager"]
+        sender = s["governance"] if "--governance" in args else s["manager"]
+        assert prepared["meta"]["safeAddress"] == sender
         tx = prepared["transactions"][0]
         s["client"].eth.send_transaction({
-            "from": s["manager"], "to": tx["to"], "data": tx["data"]
+            "from": sender, "to": tx["to"], "data": tx["data"]
         })
 
     burner = s["funding"].functions.recipient().call()
-    execute("draw", "--usdc", "10")
+    execute("fund-round", "--usdc", "30")
+    pending = report(s["client"], s["c"])
+    assert pending["spent"] == "0"
+    assert pending["funding_next_week"] == str(s["start"])
+    assert pending["funding_payments"] == [str(15 * 10**6)] * 2
+    assert run(s["client"], s["c"], directory=tmp_path, funding_only=True)["status"] == "not due"
+    s["tester"].time_travel(s["start"])
+    s["tester"].mine_block()
+    payment = run(s["client"], {**s["c"], "proceeds": None}, directory=tmp_path, funding_only=True)
+    assert payment["status"] == "funding payment" and payment["usdc"] == str(15 * 10**6)
+    submit(s, payment)
     execute("set-recipient", "--account", s["payee"])
-    execute("draw", "--usdc", "20")
-    assert s["usdc"].functions.balanceOf(burner).call() == 10 * 10**6
-    assert s["usdc"].functions.balanceOf(s["payee"]).call() == 20 * 10**6
+    s["tester"].time_travel(s["start"] + WEEK)
+    s["tester"].mine_block()
+    submit(s, run(s["client"], s["c"], directory=tmp_path, funding_only=True))
+    assert s["usdc"].functions.balanceOf(burner).call() == 15 * 10**6
+    assert s["usdc"].functions.balanceOf(s["payee"]).call() == 15 * 10**6
     data = report(s["client"], s["c"])
     assert data["spent"] == str(30 * 10**6)
     assert all(row["sold"] == "0" for row in data["weeks"])
@@ -406,6 +421,32 @@ def test_draw_cli_and_report_record_each_recipient(chain, tmp_path, monkeypatch)
         assert int(payment["timestamp"]) == s["client"].eth.get_block(receipt.blockNumber).timestamp
         assert "week" not in payment
     assert data["funding_recipient"] == s["payee"]
+    assert data["funding_next_week"] == "0" and data["funding_payments"] == ["0", "0"]
+    execute("fund-round", "--usdc", "40")
+    execute("cancel-round", "--governance")
+    assert not s["funding"].functions.canWork().call()
+    assert s["funding"].functions.payments(0).call() == 0
+
+
+def test_funding_keeper_cli_works_without_proceeds_or_keeper_role(chain, tmp_path, monkeypatch, capsys):
+    s = chain
+    s["funding"].functions.fund_round(20 * 10**6).transact({"from": s["manager"]})
+    s["escrow"].functions.set_keeper(s["keeper"], False).transact({"from": s["manager"]})
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({**s["c"], "proceeds": None}))
+    monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
+    monkeypatch.setattr("sys.argv", [
+        "vyper-grant", "--config", str(config), "--out", str(tmp_path), "funding-keeper",
+    ])
+    s["tester"].time_travel(s["start"])
+    s["tester"].mine_block()
+    main()
+    prepared = json.loads(capsys.readouterr().out)
+    function, args = s["funding"].decode_function_input(prepared["data"])
+    assert function.fn_name == "work" and args == {}
+    submit(s, prepared)
+    main()
+    assert json.loads(capsys.readouterr().out)["status"] == "not due"
 
 
 def test_archive_read_excludes_boundary_block_revote(chain):

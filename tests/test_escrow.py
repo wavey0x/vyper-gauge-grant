@@ -43,95 +43,6 @@ def test_claimable_checkpoints_without_minting_and_quote_only_prices(system):
     assert s.escrow.claimable() == amount
 
 
-def test_draw_can_use_yield_and_topups_without_a_lifetime_cap(system):
-    s = system
-    s.usdc.mint(s.vault.address, 10_000 * 10**6)
-    s.vault.configure(11 * UNIT // 10, False)
-    assert s.funding.assets() == 110_000 * 10**6
-    with boa.env.prank(s.manager):
-        s.funding.draw(110_000 * 10**6)
-    assert s.vault.balanceOf(s.funding.address) == s.funding.assets() == 0
-    s.usdc.mint(s.manager, 22_000 * 10**6)
-    with boa.env.prank(s.manager):
-        s.usdc.approve(s.vault.address, 22_000 * 10**6)
-        s.vault.deposit(22_000 * 10**6, s.funding.address)
-        s.funding.draw(22_000 * 10**6)
-    assert s.usdc.balanceOf(s.payee) == 132_000 * 10**6
-    assert s.funding.assets() == 0
-
-
-def test_failed_withdrawal_does_not_record_payment(system):
-    s = system
-    shares = s.vault.balanceOf(s.funding.address)
-    s.vault.configure(UNIT, True)
-    with boa.env.prank(s.manager), boa.reverts("withdrawal"):
-        s.funding.draw(100 * 10**6)
-    assert s.usdc.balanceOf(s.payee) == 0
-    assert s.vault.balanceOf(s.funding.address) == shares
-
-
-def test_draw_withdraws_exact_usdc_and_leaves_loose_tokens_untouched(system):
-    s = system
-    s.usdc.mint(s.vault.address, 10_000 * 10**6)
-    s.vault.configure(11 * UNIT // 10, False)
-    s.usdc.mint(s.funding.address, 100 * 10**6)
-    assert s.funding.assets() == 110_000 * 10**6
-    shares = s.vault.balanceOf(s.funding.address)
-    amount = 123_456_789
-    burned = (amount * UNIT + s.vault.price() - 1) // s.vault.price()
-    with boa.env.prank(s.manager):
-        s.funding.draw(amount)
-    assert s.usdc.balanceOf(s.payee) == amount
-    assert s.usdc.balanceOf(s.funding.address) == 100 * 10**6
-    assert s.vault.balanceOf(s.funding.address) == shares - burned
-
-
-def test_insufficient_shares_revert_even_with_loose_usdc(system):
-    s = system
-    s.usdc.mint(s.funding.address, 1000 * 10**6)
-    shares = s.vault.balanceOf(s.funding.address)
-    with boa.env.prank(s.manager), boa.reverts():
-        s.funding.draw(100_001 * 10**6)
-    assert s.usdc.balanceOf(s.payee) == 0
-    assert s.usdc.balanceOf(s.funding.address) == 1000 * 10**6
-    assert s.vault.balanceOf(s.funding.address) == shares
-
-
-def test_draw_permissions_and_no_programme_dates(system):
-    s = system
-    with boa.env.prank(s.stranger), boa.reverts("manager"):
-        s.funding.draw(1)
-    with boa.env.prank(s.manager):
-        with boa.reverts("amount"):
-            s.funding.draw(0)
-        s.funding.draw(1)
-        s.funding.draw(2)
-        assert s.usdc.balanceOf(s.payee) == 3
-        advance(s.start)
-        s.funding.draw(4)
-        assert s.funding.get_logs()[-1].usdc == 4
-        advance(s.start + 8 * WEEK)
-        s.funding.draw(8)
-    assert s.usdc.balanceOf(s.payee) == 15
-
-
-def test_funding_recipient_defaults_to_fee_burner_and_can_change(system):
-    s = system
-    assert s.funding.recipient() == "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8"
-    with boa.env.prank(s.stranger), boa.reverts("manager"):
-        s.funding.set_recipient(s.stranger)
-    with boa.env.prank(s.manager):
-        for invalid in ["0x" + "00" * 20, s.funding.address]:
-            with boa.reverts("recipient"):
-                s.funding.set_recipient(invalid)
-        s.funding.draw(10 * 10**6)
-        s.funding.set_recipient(s.stranger)
-        s.funding.draw(20 * 10**6)
-        assert s.funding.get_logs()[-1].recipient == s.stranger
-    assert s.usdc.balanceOf(s.payee) == 10 * 10**6
-    assert s.usdc.balanceOf(s.stranger) == 20 * 10**6
-
-
 def test_deployment_captures_initial_week_without_dates(system):
     s = system
     assert s.escrow.DEPLOYED_WEEK() == s.start - WEEK
@@ -152,15 +63,16 @@ def test_deployment_captures_initial_week_without_dates(system):
 def test_proceeds_continues_after_funding_is_recovered(system):
     s = system
     with boa.env.prank(s.manager):
-        s.funding.draw(2000 * 10**6)
+        s.funding.fund_round(2000 * 10**6)
     begin(s)
+    s.funding.work()
     _, output = sale(s)
     assert s.crvusd.balanceOf(s.escrow.address) == output // 4
     with boa.env.prank(s.funding.GOVERNANCE()):
         s.funding.recover(s.vault.address, s.vault.balanceOf(s.funding.address))
     s.vault.configure(UNIT, True)
     assert s.funding.assets() == 0
-    # The second week still earns its own share, without another draw.
+    # The second week still earns its own share, after the remaining payment is cancelled by recovery.
     week = s.start + WEEK
     s.gauge.set_weight(week, 2 * (s.start + 52 * WEEK - week) * 10**12, 10**16)
     advance(week + 3600)
