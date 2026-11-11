@@ -233,19 +233,21 @@ def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
     assert s["escrow"].functions.cooldown().call() == 900
     with pytest.raises(SystemExit):
         prepare("set-cooldown", "--seconds", "599")
-    s["crvusd"].functions.mint(s["escrow"].address, 123 * 10**18).transact()
-    withdrawal = prepare(
-        "withdraw", "--token", s["crvusd"].address,
-        "--amount-raw", str(123 * 10**18), "--recipient", s["payee"],
-    )
-    assert withdrawal["meta"]["safeAddress"] == s["manager"]
-    s["client"].eth.send_transaction(
-        {
-            "from": s["manager"],
-            **{k: withdrawal["transactions"][0][k] for k in ["to", "data"]},
-        }
-    )
-    assert s["crvusd"].functions.balanceOf(s["payee"]).call() == 123 * 10**18
+    for role in ["manager", "governance"]:
+        s["crvusd"].functions.mint(s["escrow"].address, 123 * 10**18).transact()
+        withdrawal = prepare(
+            "withdraw", "--token", s["crvusd"].address,
+            "--amount-raw", str(123 * 10**18), "--recipient", s["payee"],
+            *(["--governance"] if role == "governance" else []),
+        )
+        assert withdrawal["meta"]["safeAddress"] == s[role]
+        s["client"].eth.send_transaction(
+            {
+                "from": s[role],
+                **{k: withdrawal["transactions"][0][k] for k in ["to", "data"]},
+            }
+        )
+    assert s["crvusd"].functions.balanceOf(s["payee"]).call() == 246 * 10**18
     assert s["escrow"].functions.yearn_receiver().call() == s["payee"]
     # Governance clawback must work without a deployed or configured seller.
     config.write_text(json.dumps({**s["c"], "proceeds": None, "start": None}))

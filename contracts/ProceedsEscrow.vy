@@ -54,6 +54,7 @@ WEEK: constant(uint256) = 604800
 SCALE: constant(uint256) = 10**18
 MIN_COOLDOWN: constant(uint256) = 600
 MANAGER: public(constant(address)) = 0x4444AAAACDBa5580282365e25b16309Bd770ce4a
+GOVERNANCE: public(constant(address)) = 0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52
 CRV: public(constant(address)) = 0xD533a949740bb3306d119CC777fa900bA034cd52
 CRVUSD: public(constant(address)) = 0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E
 GAUGE: public(constant(address)) = 0x3b8EFAa0A1Fca3d31144002f6D9c7412B967E0b4
@@ -188,7 +189,7 @@ def set_paused(paused: bool):
 @external
 @nonreentrant
 def withdraw(token: address, amount: uint256, recipient: address):
-    assert msg.sender == MANAGER, "manager"
+    assert msg.sender == MANAGER or msg.sender == GOVERNANCE, "management"
     assert recipient != empty(address) and recipient != self, "recipient"
     assert extcall IERC20(token).transfer(recipient, amount, default_return_value=True), "transfer"
     log Withdrawn(token=token, amount=amount, recipient=recipient)

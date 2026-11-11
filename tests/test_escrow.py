@@ -497,8 +497,10 @@ def test_delayed_sale_checks_week_and_scales_floor_for_grown_claim(system):
     assert not s.escrow.weeks(s.start + WEEK).ready
 
 
-def test_manager_withdraws_any_token_to_recipient_while_paused(system):
+@pytest.mark.parametrize("role", ["manager", "governance"])
+def test_management_withdraws_any_token_to_recipient_while_paused(system, role):
     s = system
+    caller = s.manager if role == "manager" else s.escrow.GOVERNANCE()
     token = boa.loads("""
 # pragma version ==0.4.3
 balanceOf: public(HashMap[address, uint256])
@@ -511,10 +513,11 @@ def transfer(to: address, amount: uint256):
     self.balanceOf[to] += amount
 """)
     token.mint(s.escrow.address, 123)
-    with boa.env.prank(s.keeper), boa.reverts("manager"):
+    with boa.env.prank(s.keeper), boa.reverts("management"):
         s.escrow.withdraw(token.address, 123, s.stranger)
     with boa.env.prank(s.manager):
         s.escrow.set_paused(True)
+    with boa.env.prank(caller):
         s.escrow.withdraw(token.address, 123, s.stranger)
     event = s.escrow.get_logs()[-1]
     assert event.token == token.address and event.amount == 123

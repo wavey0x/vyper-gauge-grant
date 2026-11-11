@@ -5,9 +5,21 @@ Two independent Vyper contracts on Ethereum:
 - **FundingEscrow** holds yvUSDC-1. `draw(amount)` withdraws the requested USDC directly to its configurable recipient. There are no programme dates, weekly records or lifetime spending cap; available vault shares fund each draw.
 - **ProceedsEscrow** uses `work(min_out, expected_week, quoted_crv, max_crv)` to mint pending gauge rewards, pull only the freshly minted CRV, sell through the fixed CRV → **crvUSD** route, allocate Yearn's share, and return the rest atomically. Yearn's share accumulates here by default; management can set a receiver for future sales. The contract calculates the **transaction's UTC week** and checks it matches `expected_week`; it does not reconstruct the original earning week.
 
-The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers, the Yearn proceeds receiver, pauses sales and can withdraw any ERC20 held by ProceedsEscrow to a chosen recipient. **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`) can independently claw back any ERC20 held by FundingEscrow, to itself, at any time. Neither contract calls or knows the other. Public `checkpoint()` freezes the current programme week's vote share and remains usable while paused. Sales checkpoint automatically. There is no emissions reconstruction or unsold inventory.
+The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers, the Yearn proceeds receiver, pauses sales and can withdraw any ERC20 held by ProceedsEscrow to a chosen recipient. **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`) can independently claw back any ERC20 held by FundingEscrow to itself, and withdraw any ERC20 held by ProceedsEscrow to a chosen recipient, at any time. Neither contract calls or knows the other. Public `checkpoint()` freezes the current programme week's vote share and remains usable while paused. Sales checkpoint automatically. There is no emissions reconstruction or unsold inventory.
 
 The [dashboard](dashboard/demo/index.html) has two balances, weekly proceeds and an expandable list of dated funding payments. Its [preview](dashboard/preview.png) uses illustrative data. See [accounting](docs/accounting.md) and [verification](docs/verification.md).
+
+## Permissions
+
+| Function | Who can call |
+| --- | --- |
+| Funding `draw`, `set_recipient` | Yearn manager |
+| Proceeds `set_missing_weight`, `set_yearn_receiver`, `set_keeper`, `set_cooldown`, `set_paused` | Yearn manager |
+| Funding `recover`, proceeds `withdraw` | Yearn manager or ychad.eth |
+| Proceeds `work` | Enabled keepers only, including management if explicitly enabled |
+| `checkpoint`, `claimable`, and all views | Anyone |
+
+Public helpers cannot mint, transfer, choose recipients or grant roles. `checkpoint` records only the current week's share derived from the fixed controller and voter; `claimable` checkpoints the fixed gauge for its receiver. Governance withdrawal access does not grant configuration authority. Both governance addresses are pinned to `0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`, rather than following future ENS changes.
 
 ## Operating agreement
 
@@ -72,7 +84,7 @@ Use one host/signer and a shared output directory for the process lock. A pendin
 
 `set-recipient --account ADDRESS` changes the recipient of future funding draws. `set-keeper --account ADDRESS [--disable]`, `set-paused true|false`, and `set-cooldown --seconds INTEGER` (at least 600) manage sales. Cooldown changes apply immediately relative to the last successful sale. `set-yearn-receiver --account ADDRESS` prepares a manager batch to route future Yearn shares there. Use the proceeds contract's own address to resume accumulation. Zero is rejected; existing balances stay where they are.
 
-`withdraw --token ADDRESS --amount-raw INTEGER --recipient ADDRESS` prepares a manager batch calling ProceedsEscrow's `withdraw(token, amount, recipient)`. Use it to pay TheDAO directly from accumulated crvUSD or move any other ERC20 held by the proceeds contract. It works while paused, rejects zero and the escrow itself as recipients, and emits `Withdrawn(token, amount, recipient)`. It does not change the receiver of future sales. Grant conditions and release of held proceeds remain the manager's responsibility.
+`withdraw --token ADDRESS --amount-raw INTEGER --recipient ADDRESS` prepares a manager batch; add `--governance` to prepare a **ychad.eth** batch. Both call ProceedsEscrow's `withdraw(token, amount, recipient)`. Use it to pay TheDAO directly from accumulated crvUSD or move any other ERC20 held by the proceeds contract. It works while paused, rejects zero and the escrow itself as recipients, and emits `Withdrawn(token, amount, recipient)`. It does not change the receiver of future sales. Grant conditions and release of held proceeds remain management's responsibility.
 
 `recover funding --token ADDRESS --amount-raw INTEGER` prepares a funding recovery to the manager; add `--governance` for a **ychad.eth** clawback to governance. Recover yvUSDC-1 shares directly to avoid relying on vault redemption. Recovery is independent of programme dates, the seller and the vault's withdrawal availability; it does not reverse payments already made. The governance address is pinned to its ENS resolution verified on November 10, 2026, not resolved dynamically by the contract.
 

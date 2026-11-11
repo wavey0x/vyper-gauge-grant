@@ -141,6 +141,7 @@ def main():
     r.add_argument("--token", required=True)
     r.add_argument("--amount-raw", type=int, required=True)
     r.add_argument("--recipient", required=True)
+    r.add_argument("--governance", action="store_true", help="Withdraw proceeds as ychad.eth")
     r = sub.add_parser("set-yearn-receiver")
     r.add_argument(
         "--account",
@@ -244,6 +245,8 @@ def main():
                     sender = A["governance"]
                 fn = funding.functions.recover(address(args.token), args.amount_raw)
             elif args.command == "withdraw":
+                if args.governance:
+                    sender = A["governance"]
                 fn = ef.withdraw(
                     address(args.token), args.amount_raw, address(args.recipient)
                 )

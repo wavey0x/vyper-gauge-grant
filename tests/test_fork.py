@@ -199,7 +199,10 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         held = crvusd.balanceOf(escrow.address)
         before = crvusd.balanceOf(payee)
         with boa.env.prank(A["manager"]):
-            escrow.withdraw(A["crvusd"], held, payee)
+            escrow.withdraw(A["crvusd"], held // 2, payee)
+        assert escrow.GOVERNANCE() == A["governance"]
+        with boa.env.prank(A["governance"]):
+            escrow.withdraw(A["crvusd"], held - held // 2, payee)
         assert held > 0 and crvusd.balanceOf(payee) == before + held
         assert crvusd.balanceOf(escrow.address) == 0
         assert escrow.get_logs(include_child_logs=False)[-1].recipient == payee
