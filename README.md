@@ -89,7 +89,7 @@ uv run vyper-grant keeper --send
 uv run vyper-grant --out dashboard/dist report
 ```
 
-`fund_round(amount)` takes the total USDC amount (6 decimals on chain) and sends nothing immediately. It queues `amount // 2` for `(block.timestamp // WEEK + 1) * WEEK` and the remainder for one week later. These use the same Thursday 00:00 UTC boundaries as proceeds snapshots. Queue the round during the voting week, preferably alongside the vote; a transaction included after the boundary schedules the following two weeks. A new round requires the previous one to be completed or cancelled.
+`fund_round(amount)` takes the total USDC amount (6 decimals on chain) and sends nothing immediately. It queues `amount // 2` for `(block.timestamp // WEEK + 1) * WEEK` and the same amount for one week later. Any rounding dust stays in the vault. These use the same Thursday 00:00 UTC boundaries as proceeds snapshots. Queue the round during the voting week, preferably alongside the vote; a transaction included after the boundary schedules the following two weeks. A new round requires the previous one to be completed or cancelled.
 
 Funding `canWork()` means a payment is pending and its boundary has arrived. Public `work()` has no parameters and releases exactly one payment to `recipient()`. A late call does not shift the second boundary; if both payments are overdue, two calls can settle them. There are no recurring payments, keeper permissions, weekly mappings or links to the proceeds contract. Funds stay invested in yvUSDC-1 until each withdrawal. Insufficient shares or unavailable vault liquidity revert the call and leave the payment pending; the keeper simulates before sending.
 

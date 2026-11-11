@@ -48,7 +48,7 @@ def fund_round(amount: uint256):
     assert msg.sender == MANAGER, "manager"
     assert amount >= 2, "amount"
     assert self.next_week == 0, "pending round"
-    self.payments = [amount // 2, amount - amount // 2]
+    self.payments = [amount // 2, amount // 2]
     self.next_week = (block.timestamp // WEEK + 1) * WEEK
     log RoundFunded(usdc=amount, first_week=self.next_week)
 

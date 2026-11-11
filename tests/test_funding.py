@@ -18,7 +18,7 @@ def test_two_payments_follow_week_boundaries_not_scheduling_time(system, offset)
     first = s.start + WEEK
     assert s.funding.next_week() == first
     assert s.funding.payments(0) == 10_000 * 10**6
-    assert s.funding.payments(1) == 10_000 * 10**6 + 1
+    assert s.funding.payments(1) == 10_000 * 10**6
     assert s.usdc.balanceOf(s.payee) == 0
     assert not s.funding.canWork()
     advance(first - 1)
@@ -30,7 +30,7 @@ def test_two_payments_follow_week_boundaries_not_scheduling_time(system, offset)
         s.funding.work()
     assert s.usdc.balanceOf(s.payee) == 10_000 * 10**6
     assert s.funding.next_week() == first + WEEK
-    assert s.funding.payments(0) == 10_000 * 10**6 + 1
+    assert s.funding.payments(0) == 10_000 * 10**6
     assert s.funding.payments(1) == 0
     with boa.reverts("not due"):
         s.funding.work()
@@ -38,7 +38,7 @@ def test_two_payments_follow_week_boundaries_not_scheduling_time(system, offset)
     assert not s.funding.canWork()
     advance(first + WEEK)
     s.funding.work()
-    assert s.usdc.balanceOf(s.payee) == 20_000 * 10**6 + 1
+    assert s.usdc.balanceOf(s.payee) == 20_000 * 10**6
     assert s.funding.next_week() == s.funding.payments(0) == s.funding.payments(1) == 0
     assert not s.funding.canWork()
     with boa.reverts("not due"):

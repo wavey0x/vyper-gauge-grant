@@ -2,7 +2,7 @@
 
 ## Funding
 
-FundingEscrow holds yvUSDC-1. Only the fixed Yearn manager can call `fund_round(amount)`, which queues two USDC payments without transferring anything immediately. The first is `amount // 2`, due at `(block.timestamp // 604800 + 1) * 604800`; the second is the remainder, due one week later. This matches proceeds' Thursday 00:00 UTC week boundaries. The round follows the scheduling transaction's inclusion week. An amount of at least two USDC base units ensures both payments are nonzero, and odd-unit rounding goes to the second payment.
+FundingEscrow holds yvUSDC-1. Only the fixed Yearn manager can call `fund_round(amount)`, which queues two USDC payments without transferring anything immediately. The first is `amount // 2`, due at `(block.timestamp // 604800 + 1) * 604800`; the second is also `amount // 2`, due one week later. This matches proceeds' Thursday 00:00 UTC week boundaries. The round follows the scheduling transaction's inclusion week. An amount of at least two USDC base units ensures both payments are nonzero, and any rounding dust stays in the vault.
 
 The only schedule state is `payments[2]` and `next_week`. `payments(0)` is the next amount, `payments(1)` the following amount, and `next_week` is zero when idle. A new round cannot overwrite an unpaid one. There is no permanent weekly payment, historical payment mapping, lifetime spending cap or link to proceeds eligibility. Yield and top-ups remain available for future rounds.
 
