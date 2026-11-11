@@ -28,7 +28,7 @@ def test_privileged_entry_points_enforce_roles(system, role):
         (s.escrow.set_cooldown, (900,), manager, "manager"),
         (s.escrow.set_paused, (True,), manager, "manager"),
         (s.escrow.withdraw, (s.crvusd.address, 123, s.stranger), management, "management"),
-        (s.escrow.work, (minimum, s.start, amount), {"keeper"}, "keeper or paused"),
+        (s.escrow.work, (minimum, amount), {"keeper"}, "keeper or paused"),
     ]
     for fn, args, allowed, error in actions:
         with boa.env.anchor(), boa.env.prank(caller):

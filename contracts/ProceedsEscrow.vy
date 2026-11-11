@@ -134,11 +134,10 @@ def canWork() -> bool:
 
 @external
 @nonreentrant
-def work(min_out: uint256, expected_week: uint256, max_crv: uint256):
+def work(min_out: uint256, max_crv: uint256):
     assert self.keepers[msg.sender] and not self.paused, "keeper or paused"
     assert block.timestamp - self.last_sale >= self.cooldown, "cooldown"
     week: uint256 = block.timestamp // WEEK * WEEK
-    assert week == expected_week, "stale week"
     share: uint256 = self._checkpoint(week)
     extcall Minter(MINTER).mint_for(GAUGE, RECEIVER)
     amount: uint256 = min(staticcall IERC20(CRV).balanceOf(RECEIVER), max_crv)

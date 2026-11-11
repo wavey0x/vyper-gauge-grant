@@ -36,7 +36,7 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
             output = read(f.quote(amount))
             minimum = output * (10000 - c["slippage_bps"]) // 10000
             if minimum > 0 and (closing or amount >= units(c["min_trade_crv"])):
-                fn = f.work(minimum, week, amount)
+                fn = f.work(minimum, amount)
                 action = {
                     "status": "sale",
                     "crv": str(amount),

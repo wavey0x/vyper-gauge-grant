@@ -116,7 +116,6 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             with boa.env.prank(keeper):
                 escrow.work(
                     output * 995 // 1000,
-                    boa.env.evm.patch.timestamp // WEEK * WEEK,
                     amount,
                 )
             event = escrow.get_logs(include_child_logs=False)[-1]

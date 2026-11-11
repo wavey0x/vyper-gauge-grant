@@ -21,7 +21,6 @@ def sale(s):
     with boa.env.prank(s.keeper):
         s.escrow.work(
             output * 99 // 100,
-            boa.env.evm.patch.timestamp // WEEK * WEEK,
             amount,
         )
     return amount, output
@@ -194,7 +193,7 @@ def test_sale_includes_receiver_crv_and_preserves_escrow_balances(system):
     assert s.crvusd.balanceOf(s.receiver) - before_returned == output - output // 4
     assert preview(s) == (0, 0)
     with boa.env.prank(s.keeper), boa.reverts("cooldown"):
-        s.escrow.work(0, s.start, 1)
+        s.escrow.work(0, 1)
 
 
 def test_public_checkpoint_captures_boundary_without_claiming_while_paused(system):
@@ -209,7 +208,7 @@ def test_public_checkpoint_captures_boundary_without_claiming_while_paused(syste
     advance(s.start + 3600)
     assert s.escrow.checkpoint() == UNIT // 4
     with boa.env.prank(s.keeper), boa.reverts("keeper or paused"):
-        s.escrow.work(0, s.start, 1)
+        s.escrow.work(0, 1)
 
 
 def test_boundary_tail_uses_new_week_share(system):
@@ -299,7 +298,7 @@ def test_failed_sale_rolls_back_snapshot_claim_and_transfers(system, failure):
     amount, output = preview(s)
     with boa.env.prank(s.keeper), boa.reverts():
         s.escrow.work(
-            output + 1 if failure == "slippage" else output, s.start, amount
+            output + 1 if failure == "slippage" else output, amount
         )
     assert not s.escrow.weeks(s.start).ready
     assert s.escrow.last_sale() == last_sale and s.escrow.canWork()
@@ -434,11 +433,11 @@ def test_only_authorized_keepers_sell(system):
     s = system
     begin(s)
     with boa.env.prank(s.stranger), boa.reverts("keeper or paused"):
-        s.escrow.work(0, s.start, 1)
+        s.escrow.work(0, 1)
     with boa.env.prank(s.manager):
         s.escrow.set_keeper(s.keeper, False)
     with boa.env.prank(s.keeper), boa.reverts("keeper or paused"):
-        s.escrow.work(0, s.start, 1)
+        s.escrow.work(0, 1)
 
 
 def test_sale_cooldown_and_manager_floor(system):
@@ -457,7 +456,7 @@ def test_sale_cooldown_and_manager_floor(system):
     advance(sold_at + 599)
     amount, output = preview(s)
     with boa.env.prank(s.stranger), boa.reverts("cooldown"):
-        s.escrow.work(output, s.start, amount)
+        s.escrow.work(output, amount)
     assert s.escrow.last_sale() == sold_at
     advance(sold_at + 600)
     assert s.escrow.canWork()
@@ -483,21 +482,34 @@ def test_delayed_sale_caps_pull_and_passes_minimum_unchanged(system):
     assert available > amount
     s.pool.configure(UNIT // 4, 9000)
     with boa.env.prank(s.keeper), boa.reverts("slippage"):
-        s.escrow.work(output, s.start, amount)
+        s.escrow.work(output, amount)
     assert s.minter.minted(s.receiver, s.gauge.address) == minted
     assert not s.escrow.weeks(s.start).ready
     s.pool.configure(UNIT // 4, 10000)
     with boa.env.prank(s.keeper):
-        s.escrow.work(output, s.start, amount)
+        s.escrow.work(output, amount)
     event = s.escrow.get_logs()[-1]
     assert event.crv == amount and event.crvusd == output
     assert s.crv.balanceOf(s.receiver) == available - amount
-    minted = s.minter.minted(s.receiver, s.gauge.address)
+
+
+def test_quote_before_boundary_executes_with_new_week_split(system):
+    s = system
+    begin(s)
+    sale(s)  # Capture this week's quarter share before the revote.
+    s.gauge.set_vote(s.voter, 2 * 10**12, s.start + 52 * WEEK, s.start + 3600)
+    advance(s.start + WEEK - 60)
+    amount, output = preview(s)
     advance(s.start + WEEK + 60)
-    with boa.env.prank(s.keeper), boa.reverts("stale week"):
-        s.escrow.work(output, s.start, amount)
-    assert s.minter.minted(s.receiver, s.gauge.address) == minted
-    assert not s.escrow.weeks(s.start + WEEK).ready
+    with boa.env.prank(s.keeper):
+        s.escrow.work(output, amount)
+    event = s.escrow.get_logs()[-1]
+    assert event.week == s.start + WEEK
+    assert event.crv == amount and event.crvusd == output
+    assert event.yearn == output // 2
+    assert s.escrow.weeks(s.start).share == UNIT // 4
+    assert s.escrow.weeks(s.start + WEEK).share == UNIT // 2
+    assert s.crv.balanceOf(s.receiver) > 0
 
 
 def test_capped_batches_can_drain_balance_without_new_mint(system):
@@ -510,14 +522,14 @@ def test_capped_batches_can_drain_balance_without_new_mint(system):
     )
     for amount, remainder in [(10 * UNIT, 15 * UNIT), (10 * UNIT, 5 * UNIT), (5 * UNIT, 0)]:
         with boa.env.prank(s.keeper):
-            s.escrow.work(s.escrow.quote(amount), s.start, 10 * UNIT)
+            s.escrow.work(s.escrow.quote(amount), 10 * UNIT)
         assert s.escrow.get_logs()[-1].crv == amount
         assert s.crv.balanceOf(s.receiver) == remainder
         assert preview(s)[0] == remainder
         advance(s.escrow.last_sale() + 600)
     assert s.gauge.is_killed()
     with boa.env.prank(s.keeper), boa.reverts("nothing to sell"):
-        s.escrow.work(0, s.start, 10 * UNIT)
+        s.escrow.work(0, 10 * UNIT)
 
 
 def test_zero_cap_rolls_back_claim_and_snapshot(system):
@@ -526,7 +538,7 @@ def test_zero_cap_rolls_back_claim_and_snapshot(system):
     minted = s.minter.minted(s.receiver, s.gauge.address)
     last_sale = s.escrow.last_sale()
     with boa.env.prank(s.keeper), boa.reverts("nothing to sell"):
-        s.escrow.work(0, s.start, 0)
+        s.escrow.work(0, 0)
     assert s.minter.minted(s.receiver, s.gauge.address) == minted
     assert s.escrow.last_sale() == last_sale
     assert not s.escrow.weeks(s.start).ready

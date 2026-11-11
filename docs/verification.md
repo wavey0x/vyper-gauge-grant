@@ -1,12 +1,13 @@
 # Verification
 
-Verified November 11, 2026: **72 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent. The `wavey3` deployment dry run also passed against Ethereum mainnet without unlocking the account.
+Verified November 11, 2026: **74 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent. The `wavey3` deployment dry run also passed against Ethereum mainnet without unlocking the account.
 
 ```sh
 uv sync --extra dev
 uv run --no-sync vyper-grant --out build build
 RUN_FORK_TESTS=1 uv run --no-sync pytest -q
-uv run --no-sync python -m vyper_grant.deploy --account wavey3
+uv run --no-sync python -m vyper_grant.deploy --account wavey3 --only proceeds \
+  --config output/proceeds-v2.json --journal build/proceeds-v2.json
 uv build
 ```
 
@@ -14,7 +15,7 @@ uv build
 
 Both constructors take no arguments. Proceeds records its deployment week automatically and captures the current share if the controller's effective vote is still available. Tests cover deployment with zero Yearn votes, a subsequent vote that only applies next week, and a sale just before the boundary sending all output to Vyper. After the boundary, sales use the new week's share. There is no previous-week carryover rule or configured start/end date.
 
-A sale quoted before a boundary reverts if included afterward with the old `expected_week`. The operator must obtain a fresh quote. A new quote uses the execution week's split for the amount sold, including any rewards left in the multisig from previous batches. Tests explicitly distinguish that behavior from retaining the prior split. If a revote already overwrote the required voter history, checkpointing fails until management supplies the missing weight; snapshots cannot be overwritten afterward.
+A sale quoted before a boundary can execute afterward and uses the new week's split. Contract and keeper integration tests carry an unchanged quote across a boundary where Yearn's share changes, and verify that the actual execution week determines allocation. The pull cap and absolute minimum remain unchanged, including when existing receiver CRV came from previous weeks. Tests explicitly distinguish that behavior from retaining the prior split. If a revote already overwrote the required voter history, checkpointing fails until management supplies the missing weight; snapshots cannot be overwritten afterward.
 
 ## Contracts and operations
 
@@ -34,6 +35,6 @@ Before signing, the script compiles the exact Vyper standard JSON intended for E
 
 A journal records each signed transaction hash before broadcasting. Resuming uses that hash; an unresolved transaction is not automatically replaced or redeployed. Source/build changes and conflicting configured deployments are rejected. Missing `ETHERSCAN_KEY` stops the broadcast path before unlocking the account.
 
-Both contracts compile with Vyper 0.4.3. FundingEscrow is **57 lines**, with a **1,678-byte** runtime; its only mutable state is the recipient. ProceedsEscrow is **188 lines**, with a **6,172-byte** runtime; ordinary sales write only `last_sale` in escrow storage after a week's share is captured. Python compilation, shell syntax, whitespace checks and wheel/sdist builds pass. The contracts remain independent, and neither enforces grant milestones.
+Both contracts compile with Vyper 0.4.3. FundingEscrow is **57 lines**, with a **1,678-byte** runtime; its only mutable state is the recipient. ProceedsEscrow is **187 lines**, with a **6,039-byte** runtime; ordinary sales write only `last_sale` in escrow storage after a week's share is captured. Python compilation, shell syntax, whitespace checks and wheel/sdist builds pass. The contracts remain independent, and neither enforces grant milestones.
 
-These checks validate execution-week settlement under the operating agreement, not precise earning-week attribution. Sell as close to the boundary as practical, respecting cooldown. Independent claimers must stop, and substantial missed claims require reconciliation. The earlier four-argument proceeds deployment remains unchanged; this three-argument API requires a new proceeds deployment and new approvals. Funding can be reused.
+These checks validate execution-week settlement under the operating agreement, not precise earning-week attribution. Sell as close to the boundary as practical, respecting cooldown. Independent claimers must stop, and substantial missed claims require reconciliation. The earlier four-argument proceeds deployment remains unchanged; this two-argument API requires a new proceeds deployment and new approvals. Funding can be reused.

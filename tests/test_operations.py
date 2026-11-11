@@ -111,7 +111,7 @@ def begin(s):
     s["tester"].time_travel(s["start"] - 180)
     quoted = s["escrow"].functions.claimable().call()
     s["escrow"].functions.work(
-        0, (s["start"] - 180) // WEEK * WEEK, quoted
+        0, quoted
     ).transact({"from": s["keeper"]})
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
@@ -145,8 +145,7 @@ def test_keeper_prepares_one_sale_and_report_tracks_withdrawals(chain, tmp_path)
     assert result["status"] == "sale" and result["dry_run"]
     function, arguments = s["escrow"].decode_function_input(result["data"])
     assert function.fn_name == "work"
-    assert arguments["expected_week"] == s["start"]
-    assert set(arguments) == {"min_out", "expected_week", "max_crv"}
+    assert set(arguments) == {"min_out", "max_crv"}
     assert arguments["max_crv"] == int(result["max_crv"])
     assert arguments["max_crv"] == int(result["crv"])
     assert arguments["min_out"] == int(result["min_crvusd"])
@@ -413,7 +412,7 @@ def test_boundary_checkpoint_during_cooldown_does_not_bypass_next_week_minimum(c
     s["tester"].time_travel(end - 180)
     quoted = s["escrow"].functions.claimable().call()
     s["escrow"].functions.work(
-        0, s["start"], quoted
+        0, quoted
     ).transact({"from": s["keeper"]})
     s["c"]["min_trade_crv"] = "1000000"
     s["tester"].time_travel(end + 60)
@@ -425,6 +424,28 @@ def test_boundary_checkpoint_during_cooldown_does_not_bypass_next_week_minimum(c
     s["tester"].time_travel(end + 420)
     s["tester"].mine_block()
     assert run(s["client"], s["c"], directory=tmp_path)["status"] == "below minimum"
+
+
+def test_prepared_keeper_sale_can_land_in_next_week(chain, tmp_path):
+    s = chain
+    begin(s)
+    s["escrow"].functions.checkpoint().transact()
+    s["gauge"].functions.set_vote(
+        s["voter"], 2 * 10**12, s["start"] + 52 * WEEK, s["start"] + 40000
+    ).transact()
+    boundary = s["start"] + WEEK
+    s["tester"].time_travel(boundary - 180)
+    s["tester"].mine_block()
+    prepared = run(s["client"], s["c"], directory=tmp_path)
+    assert prepared["status"] == "sale"
+    s["tester"].time_travel(boundary + 60)
+    receipt = s["client"].eth.get_transaction_receipt(submit(s, prepared))
+    sold = s["escrow"].events.Sold().get_logs(
+        from_block=receipt.blockNumber, to_block=receipt.blockNumber
+    )[0]["args"]
+    assert sold["week"] == boundary
+    assert sold["yearn"] == sold["crvusd"] // 2
+    assert sold["crv"] == int(prepared["max_crv"])
 
 
 def test_uncertain_broadcast_uses_chain_state_on_next_pass(
