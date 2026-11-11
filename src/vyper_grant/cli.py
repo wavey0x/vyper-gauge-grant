@@ -210,7 +210,10 @@ def main():
             sender = A["manager"]
             if args.command == "quote":
                 block = client.eth.block_number
-                amount = ef.claimable().call(block_identifier=block)
+                amount = min(
+                    ef.claimable().call(block_identifier=block),
+                    units(c.get("max_crv", "15000")),
+                )
                 output = ef.quote(amount).call(block_identifier=block)
                 print(
                     json.dumps(

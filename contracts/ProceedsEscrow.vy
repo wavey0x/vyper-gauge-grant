@@ -116,8 +116,8 @@ def set_missing_weight(week: uint256, yearn_weight: uint256):
 
 @external
 def claimable() -> uint256:
-    """Checkpoint the gauge and return pending CRV; use eth_call to simulate."""
-    return extcall Gauge(GAUGE).claimable_tokens_write(RECEIVER)
+    """Return receiver CRV plus pending rewards; use eth_call to simulate."""
+    return staticcall IERC20(CRV).balanceOf(RECEIVER) + extcall Gauge(GAUGE).claimable_tokens_write(RECEIVER)
 
 @external
 @view
@@ -134,20 +134,17 @@ def canWork() -> bool:
 
 @external
 @nonreentrant
-def work(min_out: uint256, expected_week: uint256, quoted_crv: uint256, max_crv: uint256):
+def work(min_out: uint256, expected_week: uint256, max_crv: uint256):
     assert self.keepers[msg.sender] and not self.paused, "keeper or paused"
     assert block.timestamp - self.last_sale >= self.cooldown, "cooldown"
-    assert quoted_crv > 0 and max_crv >= quoted_crv, "quote"
     week: uint256 = block.timestamp // WEEK * WEEK
     assert week == expected_week, "stale week"
     share: uint256 = self._checkpoint(week)
-    before: uint256 = staticcall IERC20(CRV).balanceOf(RECEIVER)
     extcall Minter(MINTER).mint_for(GAUGE, RECEIVER)
-    amount: uint256 = staticcall IERC20(CRV).balanceOf(RECEIVER) - before
-    assert amount > 0, "nothing minted"
-    assert amount <= max_crv, "claim too large"
+    amount: uint256 = min(staticcall IERC20(CRV).balanceOf(RECEIVER), max_crv)
+    assert amount > 0, "nothing to sell"
     assert extcall IERC20(CRV).transferFrom(RECEIVER, self, amount), "pull"
-    output: uint256 = extcall Pool(POOL).exchange(2, 0, amount, min_out * amount // quoted_crv)
+    output: uint256 = extcall Pool(POOL).exchange(2, 0, amount, min_out)
     yearn: uint256 = output * share // SCALE
     receiver: address = self.yearn_receiver
     if yearn > 0 and receiver != self:

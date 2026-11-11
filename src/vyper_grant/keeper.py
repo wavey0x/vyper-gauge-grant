@@ -32,17 +32,15 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
         action = {"status": "checkpoint"}
         if not checkpoint_only and can_work and authorized:
             # Simulate the gauge checkpoint, then quote that amount at the same block.
-            amount = read(f.claimable())
+            amount = min(read(f.claimable()), units(c.get("max_crv", "15000")))
             output = read(f.quote(amount))
             minimum = output * (10000 - c["slippage_bps"]) // 10000
             if minimum > 0 and (closing or amount >= units(c["min_trade_crv"])):
-                # Allow ordinary claim growth while rejecting a stale oversized sale.
-                max_crv = amount * 4 + 10**18
-                fn = f.work(minimum, week, amount, max_crv)
+                fn = f.work(minimum, week, amount)
                 action = {
                     "status": "sale",
                     "crv": str(amount),
-                    "max_crv": str(max_crv),
+                    "max_crv": str(amount),
                     "week": week,
                     "min_crvusd": str(minimum),
                 }

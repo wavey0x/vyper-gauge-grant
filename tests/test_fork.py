@@ -101,11 +101,14 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             assert vault.balanceOf(A["governance"]) == before + shares
             assert vault.balanceOf(funding.address) == 0
 
-        def sell():
+        def sell(limit=None):
             with boa.env.anchor():
                 amount = escrow.claimable()
+                if limit is not None:
+                    amount = min(amount, limit)
                 output = escrow.quote(amount)
             before_crv = crv.balanceOf(A["receiver"])
+            before_minted = minter.minted(A["receiver"], A["gauge"])
             before_usd = crvusd.balanceOf(A["receiver"])
             before_held = crvusd.balanceOf(escrow.address)
             destination = escrow.yearn_receiver()
@@ -115,11 +118,12 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
                     output * 995 // 1000,
                     boa.env.evm.patch.timestamp // WEEK * WEEK,
                     amount,
-                    amount,
                 )
             event = escrow.get_logs(include_child_logs=False)[-1]
             assert event.crv == amount and event.crvusd == output
-            assert crv.balanceOf(A["receiver"]) == before_crv
+            assert crv.balanceOf(A["receiver"]) == (
+                before_crv + minter.minted(A["receiver"], A["gauge"]) - before_minted - amount
+            )
             assert crv.balanceOf(escrow.address) == 0
             assert gauge.integrate_fraction(A["receiver"]) == minter.minted(
                 A["receiver"], A["gauge"]
@@ -132,7 +136,17 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             assert crvusd.balanceOf(A["receiver"]) - before_usd == output - event.yearn
             return event
 
-        # Start clean, leaving all existing CRV untouched and returning the zero-share week's USD.
+        # Capped pulls leave real, already-minted CRV available for the next sale.
+        with boa.env.anchor():
+            with boa.env.anchor():
+                available = escrow.claimable()
+            assert available > 200 * 10**18
+            assert sell(100 * 10**18).crv == 100 * 10**18
+            assert crv.balanceOf(A["receiver"]) == available - 100 * 10**18
+            boa.env.time_travel(seconds=600)
+            assert sell(100 * 10**18).crv == 100 * 10**18
+
+        # Sell all available receiver CRV during the zero-share week; all output goes to Vyper.
         boa.env.time_travel(seconds=start - 180 - boa.env.evm.patch.timestamp)
         assert sell().yearn == 0
         boa.env.time_travel(seconds=3780)

@@ -54,6 +54,7 @@ def load_config(path):
         "deployment_block",
         "keeper",
         "min_trade_crv",
+        "max_crv",
         "slippage_bps",
         "max_gas_gwei",
     }
@@ -75,6 +76,8 @@ def load_config(path):
         raise ValueError("Slippage must be between 0 and 9999 bps")
     if units(c["min_trade_crv"]) == 0:
         raise ValueError("Minimum trade must be positive")
+    if units(c.get("max_crv", "15000")) < units(c["min_trade_crv"]):
+        raise ValueError("Maximum CRV must be at least the minimum trade")
     return c
 
 

@@ -111,7 +111,7 @@ def begin(s):
     s["tester"].time_travel(s["start"] - 180)
     quoted = s["escrow"].functions.claimable().call()
     s["escrow"].functions.work(
-        0, (s["start"] - 180) // WEEK * WEEK, quoted, quoted * 4 + 10**18
+        0, (s["start"] - 180) // WEEK * WEEK, quoted
     ).transact({"from": s["keeper"]})
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
@@ -146,9 +146,9 @@ def test_keeper_prepares_one_sale_and_report_tracks_withdrawals(chain, tmp_path)
     function, arguments = s["escrow"].decode_function_input(result["data"])
     assert function.fn_name == "work"
     assert arguments["expected_week"] == s["start"]
-    assert arguments["quoted_crv"] == int(result["crv"])
+    assert set(arguments) == {"min_out", "expected_week", "max_crv"}
     assert arguments["max_crv"] == int(result["max_crv"])
-    assert arguments["max_crv"] == arguments["quoted_crv"] * 4 + 10**18
+    assert arguments["max_crv"] == int(result["crv"])
     assert arguments["min_out"] == int(result["min_crvusd"])
     assert not s["escrow"].functions.weeks(s["start"]).call()[0]
     submit(s, result)
@@ -192,6 +192,24 @@ def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain, tmp_
     assert data["proceeds_balance"] == str(held)
     assert data["forwarded_crvusd"] == str(forwarded)
     assert int(data["totals"]["yearn"]) == held + forwarded
+
+
+def test_keeper_quotes_exact_capped_pull_including_receiver_balance(chain, tmp_path):
+    s = chain
+    begin(s)
+    s["c"].update(max_crv="100", min_trade_crv="50")
+    s["crv"].functions.mint(s["receiver"], 500 * 10**18).transact()
+    result = run(s["client"], s["c"], directory=tmp_path)
+    _, args = s["escrow"].decode_function_input(result["data"])
+    amount = 100 * 10**18
+    assert args["max_crv"] == int(result["crv"]) == amount
+    assert args["min_out"] == s["escrow"].functions.quote(amount).call() * 995 // 1000
+    receipt = s["client"].eth.get_transaction_receipt(submit(s, result))
+    sold = s["escrow"].events.Sold().get_logs(
+        from_block=receipt.blockNumber, to_block=receipt.blockNumber
+    )[0]["args"]
+    assert sold["crv"] == amount
+    assert s["crv"].functions.balanceOf(s["receiver"]).call() >= 400 * 10**18
 
 
 def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
@@ -345,7 +363,7 @@ def test_archive_read_excludes_boundary_block_revote(chain):
     assert historical["slope"] == 10**12
 
 
-def test_closing_sale_bypasses_minimum_and_sells_whole_claim(chain, tmp_path):
+def test_closing_sale_bypasses_minimum_but_respects_cap(chain, tmp_path):
     s = chain
     begin(s)
     submit(s, run(s["client"], s["c"], directory=tmp_path))
@@ -360,7 +378,9 @@ def test_closing_sale_bypasses_minimum_and_sells_whole_claim(chain, tmp_path):
     tx = submit(s, result)
     receipt = s["client"].eth.get_transaction_receipt(tx)
     assert receipt.status == 1
-    assert s["crv"].functions.balanceOf(s["receiver"]).call() == 0
+    sold = s["escrow"].events.Sold().get_logs(from_block=receipt.blockNumber, to_block=receipt.blockNumber)[0]["args"]["crv"]
+    assert sold == int(result["crv"]) <= int(s["c"]["max_crv"]) * 10**18
+    assert s["crv"].functions.balanceOf(s["receiver"]).call() > 0
     assert (
         s["gauge"].functions.integrate_fraction(s["receiver"]).call()
         == s["minter"].functions.minted(s["receiver"], s["gauge"].address).call()
@@ -393,7 +413,7 @@ def test_boundary_checkpoint_during_cooldown_does_not_bypass_next_week_minimum(c
     s["tester"].time_travel(end - 180)
     quoted = s["escrow"].functions.claimable().call()
     s["escrow"].functions.work(
-        0, s["start"], quoted, quoted * 4 + 10**18
+        0, s["start"], quoted
     ).transact({"from": s["keeper"]})
     s["c"]["min_trade_crv"] = "1000000"
     s["tester"].time_travel(end + 60)

@@ -15,7 +15,7 @@ from vyper_grant.core import CONTRACTS, ROOT
 def deployment_run(chain, tmp_path, monkeypatch):
     args = SimpleNamespace(
         account="test", config=tmp_path / "live.json", journal=tmp_path / "deployment.json",
-        broadcast=False, verify_only=False,
+        broadcast=False, verify_only=False, only=None,
     )
     key = chain["tester"].backend.account_keys[0].to_bytes()
     keystore = tmp_path / ".brownie/accounts/test.json"
@@ -78,6 +78,23 @@ def test_interrupted_broadcast_resumes_recorded_hash(deployment_run, monkeypatch
     assert json.loads(args.journal.read_text())["funding"]["tx"] == first_hash
     assert s["client"].eth.get_transaction_count(s["deployer"]) == initial_nonce + 2
     assert len(prompts) == 2
+
+
+def test_proceeds_only_deployment_preserves_existing_funding(deployment_run):
+    s, args, _, prompts, published = deployment_run
+    config = json.loads((ROOT / "config/example.json").read_text())
+    config.update(funding=s["funding"].address, deployment_block=1)
+    args.config.write_text(json.dumps(config))
+    initial_nonce = s["client"].eth.get_transaction_count(s["deployer"])
+    args.only, args.broadcast = "proceeds", True
+    deploy.execute(args)
+    saved = json.loads(args.config.read_text())
+    assert saved["funding"] == s["funding"].address
+    assert saved["deployment_block"] == 1
+    assert saved["proceeds"] != s["escrow"].address
+    assert len(prompts) == len(published) == 1
+    assert published[0][0] == "proceeds"
+    assert s["client"].eth.get_transaction_count(s["deployer"]) == initial_nonce + 1
 
 
 def test_missing_explorer_key_stops_before_unlocking(deployment_run, monkeypatch):

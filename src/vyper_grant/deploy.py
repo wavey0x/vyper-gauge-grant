@@ -116,6 +116,7 @@ def main():
     parser.add_argument("--account", default="wavey3", help="Brownie account name")
     parser.add_argument("--config", type=Path, default=Path("config/live.json"))
     parser.add_argument("--journal", type=Path, default=Path("build/deployment.json"))
+    parser.add_argument("--only", choices=CONTRACTS, help="Deploy or verify only this contract")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--broadcast", action="store_true", help="Unlock, deploy and verify")
     mode.add_argument("--verify-only", action="store_true", help="Verify saved deployments")
@@ -135,21 +136,22 @@ def main():
 
 def execute(args):
     client = rpc()
-    sources = {name: verification_input(name) for name in CONTRACTS}
+    names = (args.only,) if args.only else tuple(CONTRACTS)
+    sources = {name: verification_input(name) for name in names}
     c = load_config(args.config if args.config.exists() else ROOT / "config/example.json")
     state = json.loads(args.journal.read_text()) if args.journal.exists() else {}
     fingerprint = Web3.to_hex(Web3.keccak(text=json.dumps(sources, sort_keys=True)))
     if state and state.get("build") != fingerprint:
         raise ValueError("Deployment journal belongs to another build; restore that source to resume")
     state["build"] = fingerprint
-    for name in CONTRACTS:
+    for name in names:
         record = state.setdefault(name, {})
         if c.get(name) and c[name] != record.get("address"):
             raise ValueError(f"Config already contains an unrecorded {name} deployment; refusing to overwrite")
 
     if args.verify_only:
-        if not all(state[n].get("address") for n in CONTRACTS):
-            raise ValueError("Both recorded deployment addresses are required")
+        if not all(state[n].get("address") for n in names):
+            raise ValueError("Selected deployment addresses are required")
     else:
         if Path(args.account).name != args.account:
             raise ValueError("Use a Brownie account name, not a path")
@@ -161,7 +163,7 @@ def execute(args):
         state["deployer"] = sender
         print(f"Ethereum mainnet · {args.account}: {sender}")
         cost = 0
-        for name in CONTRACTS:
+        for name in names:
             if state[name].get("tx"):
                 print(f"{CONTRACTS[name]}: resuming {state[name]['tx']}")
                 continue
@@ -177,7 +179,7 @@ def execute(args):
             return
         if not os.environ.get("ETHERSCAN_KEY"):
             raise ValueError("ETHERSCAN_KEY is required before deployment")
-        needs_signer = any(not state[n].get("tx") for n in CONTRACTS)
+        needs_signer = any(not state[n].get("tx") for n in names)
         account = None
         if needs_signer:
             account = Account.from_key(Account.decrypt(
@@ -185,19 +187,20 @@ def execute(args):
             ))
             if account.address != sender:
                 raise ValueError("Keystore address does not match its signing key")
-        for name in CONTRACTS:
+        for name in names:
             c[name] = deploy_contract(
                 client, name, account, state[name], (args.journal, state)
             )
             c["deployment_block"] = min(
-                state[n]["block"] for n in CONTRACTS if state[n].get("block")
+                [state[n]["block"] for n in names if state[n].get("block")]
+                + ([c["deployment_block"]] if c.get("deployment_block") is not None else [])
             )
             atomic_json(args.config, c)
             print(f"{CONTRACTS[name]}: https://etherscan.io/address/{c[name]}", flush=True)
 
     if not os.environ.get("ETHERSCAN_KEY"):
         raise ValueError("ETHERSCAN_KEY is required")
-    for name in CONTRACTS:
+    for name in names:
         deployed = state[name]["address"]
         verify(client, {name: deployed}, names=(name,))
         print(f"Verifying {CONTRACTS[name]}…", flush=True)
