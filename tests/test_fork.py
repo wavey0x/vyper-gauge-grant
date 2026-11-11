@@ -25,7 +25,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         vault = attach("vault", A["vault"])
         usdc = attach("token", A["usdc"])
         crv = attach("token", A["crv"])
-        intermediate = attach("token", A["crvusd"])
+        crvusd = attach("token", A["crvusd"])
         gauge = attach("gauge", A["gauge"])
         minter = attach("minter", A["minter"])
         ctrl_abi = abi("controller") + [
@@ -60,6 +60,8 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             },
         ]
         ctrl = boa.loads_abi(json.dumps(ctrl_abi)).at(A["controller"])
+        pool = attach("pool", A["pool"])
+        assert pool.coins(0) == A["crvusd"] and pool.coins(2) == A["crv"]
         voter = A["voter"]
         keeper, payee = [boa.env.generate_address() for _ in range(2)]
         start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK
@@ -106,11 +108,10 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
                 amount = escrow.claimable()
                 output = escrow.quote(amount)
             before_crv = crv.balanceOf(A["receiver"])
-            before_usd = usdc.balanceOf(A["receiver"])
-            before_held = usdc.balanceOf(escrow.address)
+            before_usd = crvusd.balanceOf(A["receiver"])
+            before_held = crvusd.balanceOf(escrow.address)
             destination = escrow.yearn_receiver()
-            before_destination = usdc.balanceOf(destination)
-            before_intermediate = intermediate.balanceOf(escrow.address)
+            before_destination = crvusd.balanceOf(destination)
             with boa.env.prank(keeper):
                 escrow.work(
                     output * 995 // 1000,
@@ -119,19 +120,18 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
                     amount,
                 )
             event = escrow.get_logs(include_child_logs=False)[-1]
-            assert event.crv == amount and event.usdc == output
+            assert event.crv == amount and event.crvusd == output
             assert crv.balanceOf(A["receiver"]) == before_crv
             assert crv.balanceOf(escrow.address) == 0
             assert gauge.integrate_fraction(A["receiver"]) == minter.minted(
                 A["receiver"], A["gauge"]
             )
             assert event.yearn_receiver == destination
-            assert usdc.balanceOf(destination) - before_destination == event.yearn
-            assert usdc.balanceOf(escrow.address) - before_held == (
+            assert crvusd.balanceOf(destination) - before_destination == event.yearn
+            assert crvusd.balanceOf(escrow.address) - before_held == (
                 event.yearn if destination == escrow.address else 0
             )
-            assert intermediate.balanceOf(escrow.address) == before_intermediate
-            assert usdc.balanceOf(A["receiver"]) - before_usd == output - event.yearn
+            assert crvusd.balanceOf(A["receiver"]) - before_usd == output - event.yearn
             return event
 
         # Start clean, leaving all existing CRV untouched and returning pre-start USD.
@@ -142,7 +142,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         first = sell()
         share = escrow.weeks(start).share
         assert 0 < share < 10**18
-        assert first.week == start and first.yearn == first.usdc * share // 10**18
+        assert first.week == start and first.yearn == first.crvusd * share // 10**18
         with boa.env.anchor():
             assert escrow.claimable() == 0
 
@@ -155,7 +155,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         boa.env.time_travel(seconds=600)
         tail = sell()
         assert tail.week == start + WEEK
-        assert tail.yearn == tail.usdc * escrow.weeks(start + WEEK).share // 10**18 > 0
+        assert tail.yearn == tail.crvusd * escrow.weeks(start + WEEK).share // 10**18 > 0
 
         # Checkpoint before replacing Yearn's vote, after the real ten-day delay.
         boa.env.time_travel(

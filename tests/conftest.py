@@ -42,7 +42,6 @@ def deploy_mocks():
         controller=load("Controller", "controller", A["gauge"]),
         minter=load("Minter", "minter", A["crv"]),
         pool=load("Pool", "pool", A["crv"], A["crvusd"]),
-        stable_pool=load("StablePool", "stable_pool", A["usdc"], A["crvusd"]),
     )
 
 
@@ -51,7 +50,7 @@ def system():
     manager, receiver, voter = A["manager"], A["receiver"], A["voter"]
     keeper, stranger = [boa.env.generate_address() for _ in range(2)]
     mocks = deploy_mocks()
-    usdc, crv, crvusd, vault, gauge, controller, minter, pool, stable_pool = (
+    usdc, crv, crvusd, vault, gauge, controller, minter, pool = (
         mocks.values()
     )
     start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK

@@ -76,7 +76,7 @@ def chain(monkeypatch):
             address=receipt.contractAddress, abi=artifact(name)["abi"]
         )
 
-    usdc, crv, crvusd, vault, gauge, controller, minter, pool, stable_pool = [
+    usdc, crv, crvusd, vault, gauge, controller, minter, pool = [
         client.eth.contract(address=str(mock.address), abi=mock.abi)
         for mock in mocks.values()
     ]
@@ -152,7 +152,7 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     assert arguments["quoted_crv"] == int(result["crv"])
     assert arguments["max_crv"] == int(result["max_crv"])
     assert arguments["max_crv"] == arguments["quoted_crv"] * 4 + 10**18
-    assert arguments["min_out"] == int(result["min_usdc"])
+    assert arguments["min_out"] == int(result["min_crvusd"])
     assert not s["escrow"].functions.weeks(s["start"]).call()[0]
     submit(s, result)
     assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
@@ -161,33 +161,38 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     assert "budget" not in data
     assert int(data["totals"]["yearn"]) > 0
     assert data["proceeds_balance"] == data["totals"]["yearn"]
+    s["usdc"].functions.mint(s["escrow"].address, 7 * 10**6).transact()
     s["escrow"].functions.recover(
-        s["usdc"].address, int(data["proceeds_balance"])
+        s["usdc"].address, 7 * 10**6
+    ).transact({"from": s["manager"]})
+    assert report(s["client"], s["c"])["withdrawn_crvusd"] == "0"
+    s["escrow"].functions.recover(
+        s["crvusd"].address, int(data["proceeds_balance"])
     ).transact({"from": s["manager"]})
     recovered = report(s["client"], s["c"])
     assert recovered["proceeds_balance"] == "0"
     assert recovered["totals"] == data["totals"]
-    assert recovered["withdrawn_usdc"] == data["proceeds_balance"]
+    assert recovered["withdrawn_crvusd"] == data["proceeds_balance"]
 
 
 def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain, tmp_path):
     s = chain
     begin(s)
     submit(s, run(s["client"], s["c"], directory=tmp_path))
-    held = s["usdc"].functions.balanceOf(s["escrow"].address).call()
+    held = s["crvusd"].functions.balanceOf(s["escrow"].address).call()
     s["escrow"].functions.set_yearn_receiver(s["payee"]).transact(
         {"from": s["manager"]}
     )
-    before = s["usdc"].functions.balanceOf(s["payee"]).call()
+    before = s["crvusd"].functions.balanceOf(s["payee"]).call()
     s["tester"].time_travel(s["start"] + 80000)
     s["tester"].mine_block()
     submit(s, run(s["client"], s["c"], directory=tmp_path))
     data = report(s["client"], s["c"])
-    forwarded = s["usdc"].functions.balanceOf(s["payee"]).call() - before
+    forwarded = s["crvusd"].functions.balanceOf(s["payee"]).call() - before
     assert forwarded > 0
     assert data["yearn_receiver"] == s["payee"]
     assert data["proceeds_balance"] == str(held)
-    assert data["forwarded_usdc"] == str(forwarded)
+    assert data["forwarded_crvusd"] == str(forwarded)
     assert int(data["totals"]["yearn"]) == held + forwarded
 
 

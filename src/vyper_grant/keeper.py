@@ -45,7 +45,7 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
                     "crv": str(amount),
                     "max_crv": str(max_crv),
                     "week": week,
-                    "min_usdc": str(minimum),
+                    "min_crvusd": str(minimum),
                 }
             elif not snapshot_due:
                 return {"status": "below minimum"}

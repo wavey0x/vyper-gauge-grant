@@ -3,10 +3,10 @@
   "as_of": "1794250000",
   "spent": "12000000000",
   "funding_assets": "88420000000",
-  "proceeds_balance": "15600000000",
+  "proceeds_balance": "15600000000000000000000",
   "totals": {
-    "output": "26000000000",
-    "yearn": "15600000000"
+    "output": "26000000000000000000000",
+    "yearn": "15600000000000000000000"
   },
   "weeks": [
     {
@@ -14,7 +14,7 @@
       "ready": true,
       "status": "Closed",
       "share": "600000000000000000",
-      "yearn": "5300000000",
+      "yearn": "5300000000000000000000",
       "active": true
     },
     {
@@ -22,7 +22,7 @@
       "ready": true,
       "status": "Closed",
       "share": "600000000000000000",
-      "yearn": "6100000000",
+      "yearn": "6100000000000000000000",
       "active": true
     },
     {
@@ -30,13 +30,11 @@
       "ready": true,
       "status": "Active",
       "share": "600000000000000000",
-      "yearn": "4200000000",
+      "yearn": "4200000000000000000000",
       "active": true
     }
   ],
   "warnings": [],
-  "withdrawn_usdc": "0",
-  "forwarded_usdc": "0",
   "payments": [
     {
       "timestamp": "1792605600",
@@ -48,5 +46,7 @@
       "usdc": "6000000000",
       "recipient": "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8"
     }
-  ]
+  ],
+  "forwarded_crvusd": "0",
+  "withdrawn_crvusd": "0"
 }

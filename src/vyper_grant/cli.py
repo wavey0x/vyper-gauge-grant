@@ -113,7 +113,7 @@ def doctor(client, c):
 
 def main():
     p = argparse.ArgumentParser(
-        description="Vyper programme: vault funding and USDC proceeds"
+        description="Vyper programme: vault funding and crvUSD proceeds"
     )
     p.add_argument("--config", default="config/live.json")
     p.add_argument("--out", default="output")
@@ -219,7 +219,7 @@ def main():
                     json.dumps(
                         {
                             "crv": str(amount),
-                            "usdc": str(output),
+                            "crvusd": str(output),
                         }
                     )
                 )
