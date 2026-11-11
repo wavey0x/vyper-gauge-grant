@@ -497,7 +497,7 @@ def test_delayed_sale_checks_week_and_scales_floor_for_grown_claim(system):
     assert not s.escrow.weeks(s.start + WEEK).ready
 
 
-def test_manager_recovers_any_token_while_paused(system):
+def test_manager_withdraws_any_token_to_recipient_while_paused(system):
     s = system
     token = boa.loads("""
 # pragma version ==0.4.3
@@ -512,8 +512,31 @@ def transfer(to: address, amount: uint256):
 """)
     token.mint(s.escrow.address, 123)
     with boa.env.prank(s.keeper), boa.reverts("manager"):
-        s.escrow.recover(token.address, 123)
+        s.escrow.withdraw(token.address, 123, s.stranger)
     with boa.env.prank(s.manager):
         s.escrow.set_paused(True)
-        s.escrow.recover(token.address, 123)
-    assert token.balanceOf(s.manager) == 123
+        s.escrow.withdraw(token.address, 123, s.stranger)
+    event = s.escrow.get_logs()[-1]
+    assert event.token == token.address and event.amount == 123
+    assert event.recipient == s.stranger
+    assert token.balanceOf(s.stranger) == 123
+    assert token.balanceOf(s.manager) == token.balanceOf(s.escrow.address) == 0
+
+
+def test_proceeds_withdrawal_validates_recipient_and_preserves_balance_on_failure(system):
+    s = system
+    begin(s)
+    sale(s)
+    held = s.crvusd.balanceOf(s.escrow.address)
+    s.crvusd.reject(s.stranger)
+    with boa.env.prank(s.manager):
+        for invalid in ["0x" + "00" * 20, s.escrow.address]:
+            with boa.reverts("recipient"):
+                s.escrow.withdraw(s.crvusd.address, held, invalid)
+        with boa.reverts("recipient rejected"):
+            s.escrow.withdraw(s.crvusd.address, held, s.stranger)
+        assert s.crvusd.balanceOf(s.escrow.address) == held
+        s.escrow.withdraw(s.crvusd.address, held // 2, s.payee)
+    assert s.crvusd.balanceOf(s.payee) == held // 2
+    assert s.crvusd.balanceOf(s.escrow.address) == held - held // 2
+    assert s.escrow.yearn_receiver() == s.escrow.address

@@ -45,9 +45,10 @@ event CooldownSet:
     seconds: uint256
 event Paused:
     paused: bool
-event Recovered:
+event Withdrawn:
     token: indexed(address)
     amount: uint256
+    recipient: indexed(address)
 
 WEEK: constant(uint256) = 604800
 SCALE: constant(uint256) = 10**18
@@ -186,7 +187,8 @@ def set_paused(paused: bool):
 
 @external
 @nonreentrant
-def recover(token: address, amount: uint256):
+def withdraw(token: address, amount: uint256, recipient: address):
     assert msg.sender == MANAGER, "manager"
-    assert extcall IERC20(token).transfer(MANAGER, amount, default_return_value=True), "transfer"
-    log Recovered(token=token, amount=amount)
+    assert recipient != empty(address) and recipient != self, "recipient"
+    assert extcall IERC20(token).transfer(recipient, amount, default_return_value=True), "transfer"
+    log Withdrawn(token=token, amount=amount, recipient=recipient)

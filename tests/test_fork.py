@@ -196,3 +196,10 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
 
         boa.env.time_travel(seconds=escrow.END() + 60 - boa.env.evm.patch.timestamp)
         assert sell().yearn == 0
+        held = crvusd.balanceOf(escrow.address)
+        before = crvusd.balanceOf(payee)
+        with boa.env.prank(A["manager"]):
+            escrow.withdraw(A["crvusd"], held, payee)
+        assert held > 0 and crvusd.balanceOf(payee) == before + held
+        assert crvusd.balanceOf(escrow.address) == 0
+        assert escrow.get_logs(include_child_logs=False)[-1].recipient == payee

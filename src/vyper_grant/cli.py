@@ -131,12 +131,16 @@ def main():
     s = sub.add_parser("set-missing-weight")
     s.add_argument("--week", type=int, required=True)
     r = sub.add_parser("recover")
-    r.add_argument("contract", choices=CONTRACTS)
+    r.add_argument("contract", choices=["funding"])
     r.add_argument("--token", required=True)
     r.add_argument("--amount-raw", type=int, required=True)
     r.add_argument(
         "--governance", action="store_true", help="Recover funding to ychad.eth"
     )
+    r = sub.add_parser("withdraw", help="Send held proceeds or another token to a recipient")
+    r.add_argument("--token", required=True)
+    r.add_argument("--amount-raw", type=int, required=True)
+    r.add_argument("--recipient", required=True)
     r = sub.add_parser("set-yearn-receiver")
     r.add_argument(
         "--account",
@@ -201,9 +205,7 @@ def main():
             )
             return
         else:
-            funding_only = args.command in ["draw", "set-recipient"] or (
-                args.command == "recover" and args.contract == "funding"
-            )
+            funding_only = args.command in ["draw", "set-recipient", "recover"]
             if funding_only:
                 (funding,) = verify(client, c, names=("funding",))
             else:
@@ -239,14 +241,12 @@ def main():
                 meta = {"historicalVote": historical, "yearnWeight": str(yearn_weight)}
             elif args.command == "recover":
                 if args.governance:
-                    if args.contract != "funding":
-                        raise ValueError(
-                            "Governance recovery applies to the funding contract"
-                        )
                     sender = A["governance"]
-                fn = (
-                    funding if args.contract == "funding" else escrow
-                ).functions.recover(address(args.token), args.amount_raw)
+                fn = funding.functions.recover(address(args.token), args.amount_raw)
+            elif args.command == "withdraw":
+                fn = ef.withdraw(
+                    address(args.token), args.amount_raw, address(args.recipient)
+                )
             elif args.command == "set-yearn-receiver":
                 fn = ef.set_yearn_receiver(address(args.account))
             elif args.command == "set-recipient":

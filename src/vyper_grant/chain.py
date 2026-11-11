@@ -150,7 +150,7 @@ def report(client, c):
         weeks=sorted(rows.values(), key=lambda r: r["week"]),
         withdrawn_crvusd=sum(
             e["args"]["amount"]
-            for e in events(proceeds.events.Recovered())
+            for e in events(proceeds.events.Withdrawn())
             if e["args"]["token"] == ADDRESSES["crvusd"]
         ),
         warnings=list(dict.fromkeys(warnings)),

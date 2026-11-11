@@ -141,7 +141,7 @@ def test_verified_contracts_and_idempotent_setup(chain):
         verify(s["client"], {**s["c"], "funding": s["gauge"].address})
 
 
-def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
+def test_keeper_prepares_one_sale_and_report_tracks_withdrawals(chain, tmp_path):
     s = chain
     begin(s)
     result = run(s["client"], s["c"], directory=tmp_path)
@@ -162,17 +162,18 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     assert int(data["totals"]["yearn"]) > 0
     assert data["proceeds_balance"] == data["totals"]["yearn"]
     s["usdc"].functions.mint(s["escrow"].address, 7 * 10**6).transact()
-    s["escrow"].functions.recover(
-        s["usdc"].address, 7 * 10**6
+    s["escrow"].functions.withdraw(
+        s["usdc"].address, 7 * 10**6, s["payee"]
     ).transact({"from": s["manager"]})
     assert report(s["client"], s["c"])["withdrawn_crvusd"] == "0"
-    s["escrow"].functions.recover(
-        s["crvusd"].address, int(data["proceeds_balance"])
+    s["escrow"].functions.withdraw(
+        s["crvusd"].address, int(data["proceeds_balance"]), s["payee"]
     ).transact({"from": s["manager"]})
-    recovered = report(s["client"], s["c"])
-    assert recovered["proceeds_balance"] == "0"
-    assert recovered["totals"] == data["totals"]
-    assert recovered["withdrawn_crvusd"] == data["proceeds_balance"]
+    withdrawn = report(s["client"], s["c"])
+    assert withdrawn["proceeds_balance"] == "0"
+    assert withdrawn["totals"] == data["totals"]
+    assert withdrawn["withdrawn_crvusd"] == data["proceeds_balance"]
+    assert s["crvusd"].functions.balanceOf(s["payee"]).call() == int(data["proceeds_balance"])
 
 
 def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain, tmp_path):
@@ -196,7 +197,7 @@ def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain, tmp_
     assert int(data["totals"]["yearn"]) == held + forwarded
 
 
-def test_cli_prepares_receiver_change_and_governance_clawback(
+def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
     chain, tmp_path, monkeypatch
 ):
     s = chain
@@ -232,6 +233,20 @@ def test_cli_prepares_receiver_change_and_governance_clawback(
     assert s["escrow"].functions.cooldown().call() == 900
     with pytest.raises(SystemExit):
         prepare("set-cooldown", "--seconds", "599")
+    s["crvusd"].functions.mint(s["escrow"].address, 123 * 10**18).transact()
+    withdrawal = prepare(
+        "withdraw", "--token", s["crvusd"].address,
+        "--amount-raw", str(123 * 10**18), "--recipient", s["payee"],
+    )
+    assert withdrawal["meta"]["safeAddress"] == s["manager"]
+    s["client"].eth.send_transaction(
+        {
+            "from": s["manager"],
+            **{k: withdrawal["transactions"][0][k] for k in ["to", "data"]},
+        }
+    )
+    assert s["crvusd"].functions.balanceOf(s["payee"]).call() == 123 * 10**18
+    assert s["escrow"].functions.yearn_receiver().call() == s["payee"]
     # Governance clawback must work without a deployed or configured seller.
     config.write_text(json.dumps({**s["c"], "proceeds": None, "start": None}))
     shares = s["vault"].functions.balanceOf(s["funding"].address).call()
