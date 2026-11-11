@@ -68,8 +68,6 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         funding = boa.load(str(ROOT / "contracts/FundingEscrow.vy"))
         escrow = boa.load(
             str(ROOT / "contracts/ProceedsEscrow.vy"),
-            start,
-            4,
         )
         holder = "0x55FE002aefF02F77364de339a1292923A15844B8"
         with boa.env.prank(holder):
@@ -134,7 +132,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             assert crvusd.balanceOf(A["receiver"]) - before_usd == output - event.yearn
             return event
 
-        # Start clean, leaving all existing CRV untouched and returning pre-start USD.
+        # Start clean, leaving all existing CRV untouched and returning the zero-share week's USD.
         boa.env.time_travel(seconds=start - 180 - boa.env.evm.patch.timestamp)
         assert sell().yearn == 0
         boa.env.time_travel(seconds=3780)
@@ -194,7 +192,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             else:
                 raise AssertionError("Gauge did not reach its cap")
 
-        boa.env.time_travel(seconds=escrow.END() + 60 - boa.env.evm.patch.timestamp)
+        boa.env.time_travel(seconds=start + 4 * WEEK + 60 - boa.env.evm.patch.timestamp)
         assert sell().yearn == 0
         held = crvusd.balanceOf(escrow.address)
         before = crvusd.balanceOf(payee)

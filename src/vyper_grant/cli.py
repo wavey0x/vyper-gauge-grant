@@ -39,19 +39,14 @@ def batch(sender, *calls, **meta):
 
 
 def deployment(client, c, name, deployer):
-    args = []
-    if name == "proceeds":
-        if not c.get("start"):
-            raise ValueError("Configure start before deploying proceeds")
-        args = [c["start"], c["weeks"]]
     compiled = artifact(name)
     factory = client.eth.contract(abi=compiled["abi"], bytecode=compiled["bytecode"])
-    tx = factory.constructor(*args).build_transaction(
+    tx = factory.constructor().build_transaction(
         {"from": address(deployer), "chainId": 1}
     )
     return {
         "contract": CONTRACTS[name],
-        "constructor_arguments": args,
+        "constructor_arguments": [],
         "transaction": tx,
     }
 
@@ -75,7 +70,6 @@ def doctor(client, c):
             "funding",
             "proceeds",
             "deployment_block",
-            "start",
             "keeper",
         ]
         if c.get(key) is None
@@ -91,7 +85,7 @@ def doctor(client, c):
             funding_assets=str(f.functions.assets().call()),
             funding_recipient=f.functions.recipient().call(),
         )
-    if all(c.get(k) is not None for k in ["proceeds", "start", "weeks", "keeper"]):
+    if all(c.get(k) is not None for k in ["proceeds", "keeper"]):
         (p,) = verify(client, c, names=("proceeds",))
         result.update(
             paused=p.functions.paused().call(),

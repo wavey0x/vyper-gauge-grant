@@ -28,7 +28,7 @@ def test_config_and_decimal_validation(tmp_path):
     c = json.loads((ROOT / "config/example.json").read_text())
     p = tmp_path / "config.json"
     p.write_text(json.dumps(c))
-    assert load_config(p)["weeks"] == 26
+    assert "start" not in load_config(p) and "weeks" not in load_config(p)
     c["slippage_bps"] = 10000
     p.write_text(json.dumps(c))
     with pytest.raises(ValueError, match="Slippage"):

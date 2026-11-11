@@ -4,7 +4,7 @@ from conftest import ROOT, WEEK, UNIT, advance
 
 
 def begin(s):
-    # Clear historical rewards just before the programme starts.
+    # Clear historical rewards just before the vote week starts.
     advance(s.start - 60)
     sale(s)
     advance(s.start + 3600)
@@ -112,7 +112,7 @@ def test_draw_permissions_and_no_programme_dates(system):
         advance(s.start)
         s.funding.draw(4)
         assert s.funding.get_logs()[-1].usdc == 4
-        advance(s.escrow.END())
+        advance(s.start + 8 * WEEK)
         s.funding.draw(8)
     assert s.usdc.balanceOf(s.payee) == 15
 
@@ -134,18 +134,21 @@ def test_funding_recipient_defaults_to_fee_burner_and_can_change(system):
     assert s.usdc.balanceOf(s.stranger) == 20 * 10**6
 
 
-def test_proceeds_validates_its_own_programme_dates(system):
+def test_deployment_captures_initial_week_without_dates(system):
     s = system
-    for start, weeks, error in [
-        (boa.env.evm.patch.timestamp, 8, "start"),
-        (s.start + 1, 8, "start"),
-        (s.start, 0, "duration"),
-        (s.start, 53, "duration"),
-    ]:
-        with boa.reverts(error):
-            boa.load(str(ROOT / "contracts/ProceedsEscrow.vy"), start, weeks)
-    assert s.escrow.START() == s.start
-    assert s.escrow.END() == s.start + 8 * WEEK
+    assert s.escrow.DEPLOYED_WEEK() == s.start - WEEK
+    assert s.escrow.weeks(s.start - WEEK).ready
+    assert s.escrow.weeks(s.start - WEEK).share == 0
+    assert s.escrow.canWork()
+    # If a vote already overwrote this week's history, deployment remains possible
+    # but settlement requires an explicit manager repair rather than guessing.
+    second = boa.load(str(ROOT / "contracts/ProceedsEscrow.vy"))
+    assert not second.weeks(s.start - WEEK).ready
+    with boa.reverts("missing vote history"):
+        second.checkpoint()
+    with boa.env.prank(s.manager):
+        second.set_missing_weight(s.start - WEEK, 0)
+    assert second.checkpoint() == 0
 
 
 def test_proceeds_continues_after_funding_is_recovered(system):
@@ -232,20 +235,22 @@ def test_boundary_tail_uses_new_week_share(system):
     assert sold.week == s.start + WEEK and sold.crv == amount
 
 
-@pytest.mark.parametrize("when", ["before", "after"])
-def test_claims_outside_programme_return_everything_to_vyper(system, when):
+def test_deployment_week_with_no_effective_yearn_vote_returns_all_to_vyper(system):
     s = system
-    begin(s)
-    retained = s.crvusd.balanceOf(s.escrow.address)
-    if when == "before":
-        # begin() already settled a real pre-programme claim.
-        assert retained == 0 and s.crvusd.balanceOf(s.receiver) > 0
-        return
-    advance(s.escrow.END())
+    week = s.start - WEEK
+    assert s.escrow.weeks(week).ready and s.escrow.weeks(week).share == 0
+    # A new vote cast this week only affects next week. Deployment froze the old zero share.
+    advance(s.start - 60)
     before = s.crvusd.balanceOf(s.receiver)
     _, output = sale(s)
-    assert s.crvusd.balanceOf(s.receiver) - before == output
-    assert s.crvusd.balanceOf(s.escrow.address) == retained
+    sold = s.escrow.get_logs()[-1]
+    assert sold.week == week and sold.yearn == 0
+    assert s.crvusd.balanceOf(s.receiver) - before == output > 0
+    assert s.crvusd.balanceOf(s.escrow.address) == 0
+    advance(s.start + 600)
+    _, output = sale(s)
+    assert s.escrow.get_logs()[-1].week == s.start
+    assert s.crvusd.balanceOf(s.escrow.address) == output // 4
 
 
 def test_missing_weight_is_bounded_and_once_only(system):
@@ -338,7 +343,7 @@ def test_governance_claws_back_funding_without_sale_or_vault_dependencies(system
     if when != "before":
         begin(s)
         if when == "after":
-            advance(s.escrow.END())
+            advance(s.start + 8 * WEEK)
     with boa.env.prank(s.manager):
         s.escrow.set_paused(True)
     s.vault.configure(
@@ -377,7 +382,7 @@ def test_zero_weight_week_can_settle_pending_tail(system):
     s.gauge.set_vote(s.voter, 0, s.start, s.start - 1)
     s.gauge.set_weight(s.start, 0, 0)
     assert s.escrow.checkpoint() == 0
-    _, output = sale(s)  # The unclaimed minute before START still exists.
+    _, output = sale(s)  # The unclaimed minute before the boundary still exists.
     assert output > 0 and s.crvusd.balanceOf(s.escrow.address) == 0
 
 

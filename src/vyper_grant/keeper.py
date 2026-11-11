@@ -23,9 +23,8 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
             return fn.call(block_identifier=block)
         week = now // WEEK * WEEK
         current = named(f.weeks(week), block)
-        start, end = read(f.START()), read(f.END())
-        snapshot_due = start <= week < end and not current["ready"]
-        closing = now % WEEK >= WEEK - 300 or end <= now < end + read(f.cooldown()) + 300
+        snapshot_due = not current["ready"]
+        closing = now % WEEK >= WEEK - 300
         paused = read(f.paused())
         can_work = read(f.canWork())
         authorized = read(f.keepers(sender))

@@ -62,18 +62,15 @@ def system():
         vault.deposit(100_000 * 10**6, funding.address)
     for w in range(start - WEEK, start + 10 * WEEK, WEEK):
         gauge.set_weight(w, 4 * (start + 52 * WEEK - w) * 10**12, 10**16 + 17)
-    gauge.set_vote(voter, 10**12, start + 52 * WEEK, start - 1)
+    gauge.set_vote(voter, 0, 0, 0)
     s = SimpleNamespace(**locals())
     deploy_proceeds(s)
+    gauge.set_vote(voter, 10**12, start + 52 * WEEK, start - 1)
     return s
 
 
 def deploy_proceeds(s):
-    s.escrow = boa.load(
-        str(ROOT / "contracts/ProceedsEscrow.vy"),
-        s.start,
-        8,
-    )
+    s.escrow = boa.load(str(ROOT / "contracts/ProceedsEscrow.vy"))
     with boa.env.prank(s.manager):
         s.escrow.set_keeper(s.keeper, True)
     with boa.env.prank(s.receiver):

@@ -83,8 +83,6 @@ def chain(monkeypatch):
     start = (client.eth.get_block("latest").timestamp // WEEK + 1) * WEEK
     c = json.loads((ROOT / "config/example.json").read_text())
     c.update(
-        start=start,
-        weeks=4,
         keeper=keeper,
         deployment_block=1,
     )
@@ -135,8 +133,7 @@ def test_verified_contracts_and_idempotent_setup(chain):
     assert len(vyper["transactions"]) == len(manager["transactions"]) == 1
     assert doctor(s["client"], s["c"])["mint_enabled"]
     assert doctor(s["client"], {**s["c"], "funding": None})["mint_enabled"]
-    with pytest.raises(ValueError, match="START"):
-        verify(s["client"], {**s["c"], "start": s["start"] + WEEK})
+    assert s["escrow"].functions.DEPLOYED_WEEK().call() == s["start"] - WEEK
     with pytest.raises(ValueError, match="bytecode"):
         verify(s["client"], {**s["c"], "funding": s["gauge"].address})
 
@@ -250,7 +247,7 @@ def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
     assert s["crvusd"].functions.balanceOf(s["payee"]).call() == 246 * 10**18
     assert s["escrow"].functions.yearn_receiver().call() == s["payee"]
     # Governance clawback must work without a deployed or configured seller.
-    config.write_text(json.dumps({**s["c"], "proceeds": None, "start": None}))
+    config.write_text(json.dumps({**s["c"], "proceeds": None}))
     shares = s["vault"].functions.balanceOf(s["funding"].address).call()
     recovery = prepare(
         "recover",
@@ -296,7 +293,7 @@ def test_checkpoint_retries_while_paused_and_explicit_command_is_public(
 def test_draw_cli_and_report_record_each_recipient(chain, tmp_path, monkeypatch):
     s = chain
     config = tmp_path / "config.json"
-    config.write_text(json.dumps({**s["c"], "proceeds": None, "start": None}))
+    config.write_text(json.dumps({**s["c"], "proceeds": None}))
     monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
 
     def execute(*args):
@@ -319,7 +316,7 @@ def test_draw_cli_and_report_record_each_recipient(chain, tmp_path, monkeypatch)
     assert s["usdc"].functions.balanceOf(s["payee"]).call() == 20 * 10**6
     data = report(s["client"], s["c"])
     assert data["spent"] == str(30 * 10**6)
-    assert data["weeks"] == []  # Payments do not create or activate programme weeks.
+    assert all(row["sold"] == "0" for row in data["weeks"])
     assert [p["recipient"] for p in data["payments"]] == [burner, s["payee"]]
     for payment in data["payments"]:
         receipt = s["client"].eth.get_transaction_receipt(payment["tx"])
@@ -375,8 +372,8 @@ def test_keeper_and_weekly_reporting_work_without_payments(chain, tmp_path):
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
     before = report(s["client"], s["c"])
-    assert before["weeks"][0]["status"] == "Needs checkpoint"
-    assert before["warnings"] == ["The current programme week needs a vote snapshot"]
+    assert before["weeks"][-1]["status"] == "Needs checkpoint"
+    assert before["warnings"] == ["The current week needs a vote snapshot"]
     result = run(s["client"], {**s["c"], "funding": None}, directory=tmp_path)
     assert result["status"] == "sale"
     submit(s, result)
@@ -384,31 +381,30 @@ def test_keeper_and_weekly_reporting_work_without_payments(chain, tmp_path):
     assert data["spent"] == "0" and data["payments"] == []
     assert int(data["totals"]["yearn"]) > 0
     assert int(data["totals"]["sold"]) > 0
-    assert data["weeks"][0]["status"] == "Active"
-    assert "paid" not in data["weeks"][0]
-    assert "earned" not in data["totals"] and "remaining" not in data["weeks"][0]
+    assert data["weeks"][-1]["status"] == "Active"
+    assert "paid" not in data["weeks"][-1]
+    assert "earned" not in data["totals"] and "remaining" not in data["weeks"][-1]
 
 
-def test_programme_end_tail_is_sold_for_vyper_below_minimum(chain, tmp_path):
+def test_boundary_checkpoint_during_cooldown_does_not_bypass_next_week_minimum(chain, tmp_path):
     s = chain
-    end = s["escrow"].functions.END().call()
+    begin(s)
+    end = s["start"] + WEEK
     s["tester"].time_travel(end - 180)
     quoted = s["escrow"].functions.claimable().call()
     s["escrow"].functions.work(
-        0, (end - 180) // WEEK * WEEK, quoted, quoted * 4 + 10**18
+        0, s["start"], quoted, quoted * 4 + 10**18
     ).transact({"from": s["keeper"]})
     s["c"]["min_trade_crv"] = "1000000"
     s["tester"].time_travel(end + 60)
     s["tester"].mine_block()
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "checkpoint"
+    submit(s, result)
     assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
     s["tester"].time_travel(end + 420)
     s["tester"].mine_block()
-    result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "sale"
-    submit(s, result)
-    data = report(s["client"], s["c"])
-    assert data["weeks"][-1]["week"] == str(end)
-    assert data["weeks"][-1]["yearn"] == "0"
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "below minimum"
 
 
 def test_uncertain_broadcast_uses_chain_state_on_next_pass(

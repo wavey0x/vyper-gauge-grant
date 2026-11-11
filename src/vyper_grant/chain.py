@@ -5,15 +5,13 @@ from .core import ADDRESSES, WEEK, artifact, contract, named
 
 
 def verify(client, c, block="latest", names=("funding", "proceeds")):
-    required = set(names) | ({"start", "weeks"} if "proceeds" in names else set())
+    required = set(names)
     if any(c.get(k) is None for k in required):
         raise ValueError("Missing configuration: " + ", ".join(sorted(required)))
     contracts = {n: contract(client, n, c.get(n)) for n in names}
     expected = {"funding": {}}
     if "proceeds" in names:
         expected["proceeds"] = {
-            "START": c["start"],
-            "END": c["start"] + c["weeks"] * WEEK,
             "RECEIVER": ADDRESSES["receiver"],
         }
     for name, instance in contracts.items():
@@ -85,10 +83,10 @@ def report(client, c):
         )
         for e in events(funding.events.Drawn())
     ]
-    start, end = read(proceeds.functions.START()), read(proceeds.functions.END())
+    start = read(proceeds.functions.DEPLOYED_WEEK())
     rows = {
         week: dict(week=week, sold=0, output=0, yearn=0)
-        for week in range(start, min(end, final["timestamp"] + 1), WEEK)
+        for week in range(start, final["timestamp"] + 1, WEEK)
     }
     forwarded = 0
     for event in events(proceeds.events.Sold()):
@@ -109,20 +107,18 @@ def report(client, c):
     warnings = []
     for week, row in rows.items():
         row.update(named(proceeds.functions.weeks(week), block))
-        row["active"] = start <= week < end
+        row["active"] = True
         current = week <= final["timestamp"] < week + WEEK
-        missing = current and row["active"] and not row["ready"]
+        missing = current and not row["ready"]
         row["status"] = (
             "Needs checkpoint"
             if missing
             else "Active"
-            if current and row["active"]
-            else "Vyper only"
             if current
             else "Closed"
         )
         if missing:
-            warnings.append("The current programme week needs a vote snapshot")
+            warnings.append("The current week needs a vote snapshot")
     if read(proceeds.functions.paused()):
         warnings.append("Sales are paused; public checkpoint remains available")
     data = dict(
@@ -133,7 +129,6 @@ def report(client, c):
         funding_recipient=read(funding.functions.recipient()),
         proceeds=proceeds.address,
         start=start,
-        end=end,
         yearn_receiver=read(proceeds.functions.yearn_receiver()),
         forwarded_crvusd=forwarded,
         payments=payments,

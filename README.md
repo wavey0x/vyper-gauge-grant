@@ -5,7 +5,7 @@ Two independent Vyper contracts on Ethereum:
 - **FundingEscrow** holds yvUSDC-1. `draw(amount)` withdraws the requested USDC directly to its configurable recipient. There are no programme dates, weekly records or lifetime spending cap; available vault shares fund each draw.
 - **ProceedsEscrow** uses `work(min_out, expected_week, quoted_crv, max_crv)` to mint pending gauge rewards, pull only the freshly minted CRV, sell through the fixed CRV → **crvUSD** route, allocate Yearn's share, and return the rest atomically. Yearn's share accumulates here by default; management can set a receiver for future sales. The contract calculates the **transaction's UTC week** and checks it matches `expected_week`; it does not reconstruct the original earning week.
 
-The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers, the Yearn proceeds receiver, pauses sales and can withdraw any ERC20 held by ProceedsEscrow to a chosen recipient. **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`) can independently claw back any ERC20 held by FundingEscrow to itself, and withdraw any ERC20 held by ProceedsEscrow to a chosen recipient, at any time. Neither contract calls or knows the other. Public `checkpoint()` freezes the current programme week's vote share and remains usable while paused. Sales checkpoint automatically. There is no emissions reconstruction or unsold inventory.
+The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers, the Yearn proceeds receiver, pauses sales and can withdraw any ERC20 held by ProceedsEscrow to a chosen recipient. **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`) can independently claw back any ERC20 held by FundingEscrow to itself, and withdraw any ERC20 held by ProceedsEscrow to a chosen recipient, at any time. Neither contract calls or knows the other. Public `checkpoint()` freezes the current week's vote share and remains usable while paused. Sales checkpoint automatically. There is no emissions reconstruction or unsold inventory.
 
 The [dashboard](dashboard/demo/index.html) has two balances, weekly proceeds and an expandable list of dated funding payments. Its [preview](dashboard/preview.png) uses illustrative data. See [accounting](docs/accounting.md) and [verification](docs/verification.md).
 
@@ -25,9 +25,9 @@ Public helpers cannot mint, transfer, choose recipients or grant roles. `checkpo
 
 Vyper delegates this gauge's claims and CRV sales to the automation and stops independent claims, sales and other CRV transactions during the programme. Other approved claimers must also stop. Existing CRV in the multisig is left untouched.
 
-All of the designated Yearn voter's weight on this gauge belongs to the programme during ProceedsEscrow's active dates. Funding can be drawn fortnightly or on another agreed schedule; missing or delayed payments and funding recovery do not disable Yearn's allocation. Ending the arrangement early requires operational coordination and pausing sales while reconciling.
+All of the designated Yearn voter's weight on this gauge belongs to the programme while this automation operates. Funding can be drawn fortnightly or on another agreed schedule; missing or delayed payments and funding recovery do not disable Yearn's allocation. Ending the arrangement early requires operational coordination and pausing sales while reconciling.
 
-Start automation before the programme and clear historical pending rewards near its start. Before START and at or after END, the whole swap output returns to Vyper. Every programme week retains its frozen Yearn vote share. Both sides accept small amounts crossing rollover being split using the new week's share.
+There is no configured start or end date. Deployment captures the current week's share when its vote history is still available. If Yearn has no effective votes this week, `work()` sends the entire output to Vyper, even if Yearn has since voted for next week. Sell historical pending rewards before the first boundary with a nonzero Yearn share. After that boundary, sales use the new week's share; there is no carryover split. Both sides accept small amounts crossing rollover under this convention. Stop or pause automation and coordinate the final settlement when the programme ends.
 
 Run frequently and make a best-effort **claim and sale in the last five minutes before Thursday 00:00 UTC**, allowing for the sale cooldown. A checkpoint alone does not clear pending rewards. After a substantial outage or an independent claim, stop normal automation and reconcile with Vyper before restarting. The contract does not detect stale claims, reconstruct missed weeks or recover rewards another caller already minted. Those balances remain with Vyper.
 
@@ -43,18 +43,32 @@ Build updates `abi/contracts.json` and the artifacts in `build/`. Commit generat
 
 ## Deploy and fund
 
-Copy `config/example.json` to `config/live.json`. For proceeds, set a future Thursday 00:00 UTC **start**, the duration (1–52 weeks) and a dedicated **keeper**. Mainnet dependencies are constants. Constructors are `FundingEscrow()` and `ProceedsEscrow(start, weeks)`; either contract can be deployed first. The funding recipient defaults to fee burner `0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8`; management can change it with `set-recipient --account ADDRESS`.
+Both constructors take **no arguments**: `FundingEscrow()` and `ProceedsEscrow()`. Mainnet dependencies and management addresses are constants. The funding recipient defaults to fee burner `0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8`; management can change it with `set-recipient --account ADDRESS`.
+
+To deploy both contracts using the encrypted Brownie account `wavey3` and verify their source on Etherscan:
 
 ```sh
-uv run vyper-grant deploy funding --deployer YOUR_ADDRESS
-# Submit with your signer; record funding in config.
-uv run vyper-grant deploy proceeds --deployer YOUR_ADDRESS
-# Record proceeds and the earliest deployment_block for the combined report, then verify:
+uv run --extra dev python -m vyper_grant.deploy --account wavey3 --broadcast
+```
+
+The script prompts locally for the keystore password and uses `ETHEREUM_RPC_URL` (or `MAINNET_RPC_URL`) and `ETHERSCAN_KEY`. It compiles the exact Vyper standard JSON submitted to Etherscan and checks that it matches the committed bytecode before signing. It uses the account's existing Brownie keystore with the project's signer; Brownie itself is not needed. Without `--broadcast`, it only estimates gas and reads the account's public address.
+
+The script records each transaction hash before broadcasting in `build/deployment.json`, then saves confirmed addresses and the first deployment block in `config/live.json`. Keep the journal: repeating the command resumes recorded deployments instead of deploying duplicates. An unresolved recorded transaction must be investigated before proceeding. If only verification needs retrying, run:
+
+```sh
+uv run --extra dev python -m vyper_grant.deploy --verify-only
+```
+
+Deployment grants no keeper permission and funds neither contract. Set the dedicated `keeper` in `config/live.json`, then prepare the two setup batches:
+
+```sh
 uv run vyper-grant doctor
 uv run vyper-grant setup --allowance-crv AGREED_CRV_ALLOWANCE
 ```
 
-Deployments and manager operations prepare unsigned transactions or Safe batches. Vyper grants the CRV allowance and mint permission; Yearn enables the keeper. Funding operations need no proceeds address or start date; proceeds deployment, setup, management and the keeper need no funding address. The combined dashboard report reads both contracts. There is no activation transaction or historical accrual baseline. Run `doctor` at setup; ordinary keeper/report passes do not repeat full deployment verification. Ensure the pre-start closing sale succeeds before entering the programme.
+Vyper grants the CRV allowance and mint permission; Yearn enables the keeper. Run `doctor` again after the batches execute. Deploy before Yearn votes if possible: the constructor can preserve this week's effective vote before the controller overwrites it. If history was already overwritten, deployment still succeeds, but sales need a manager-supplied missing weight for that week. A successful sale before the boundary clears the old rewards at this week's split. Neither contract requires an activation transaction.
+
+The original `vyper-grant deploy funding|proceeds --deployer ADDRESS` commands remain available for unsigned deployments with another signer. All manager commands prepare Safe batches. Funding operations need no proceeds address; proceeds deployment, setup, management and the keeper need no funding address. The combined report reads both.
 
 Transfer yvUSDC-1 shares to FundingEscrow. The vault is `0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204`; `previewWithdraw(amount)` gives the shares needed for a USDC amount at the current price. Each draw calls `withdraw(amount, recipient, self, 0)`, letting the vault calculate and burn the required shares with zero permitted loss. `assets()` reports the USDC value of the remaining shares, including yield. Loose USDC is not used by draws or included in that value; it can be recovered through management.
 
@@ -78,7 +92,7 @@ The proceeds contract reads the designated Yearn voter's actual gauge weight eve
 
 `canWork()` is a view of global readiness: sales must be unpaused and at least `cooldown()` seconds past `last_sale()`. The default and hard minimum are **600 seconds**. It does not check caller permissions, pending rewards, vote history or swap execution; keepers still quote and simulate the full sale. Only a successful sale updates `last_sale`, shared by all keepers. Public checkpoints remain available during the cooldown.
 
-Schedule `ops/run.sh` every five minutes with `VYPER_GRANT_DIR` and `ETHEREUM_RPC_URL` set externally. The keeper checks `canWork()` before quoting; while waiting it can still capture a missing weekly snapshot. `ops/run.sh checkpoint` requests only a snapshot. Set `KEEPER_SEND=1` and `KEEPER_PRIVATE_KEY` for the dedicated signer. Nothing is scheduled by this repository. Configure the normal minimum trade, slippage and gas limit. Closing sales bypass the minimum in each week's final five minutes, including the pre-start cleanup. A final cleanup also bypasses it until one configured cooldown plus five minutes after programme end; that output belongs entirely to Vyper. All sales still respect the cooldown, require a positive quoted minimum and observe the gas limit. A stale sale reverts; its pending nonce may still block the bot until mined or manually replaced. If the closing sale misses the boundary, reconcile rather than assuming the next week's sale preserves the previous share. Stop automation and hand claims back to Vyper after the final cleanup.
+Schedule `ops/run.sh` every five minutes with `VYPER_GRANT_DIR` and `ETHEREUM_RPC_URL` set externally. The keeper checks `canWork()` before quoting; while waiting it can still capture a missing weekly snapshot. `ops/run.sh checkpoint` requests only a snapshot. Set `KEEPER_SEND=1` and `KEEPER_PRIVATE_KEY` for the dedicated signer. Nothing is scheduled by this repository. Configure the normal minimum trade, slippage and gas limit. Closing sales bypass the minimum in each week's final five minutes. Plan earlier sales so the cooldown expires in that window; a sale too early in the window can prevent another attempt closer to the boundary. All sales still respect the cooldown, require a positive quoted minimum and observe the gas limit. A stale sale reverts; its pending nonce may still block the bot until mined or manually replaced. If the closing sale misses the boundary, reconcile rather than assuming the next week's sale preserves the previous share. Stop automation and hand claims back to Vyper after the final cleanup.
 
 Use one host/signer and a shared output directory for the process lock. A pending nonce prevents another submission. After a response is lost, the next pass reads fresh claimable rewards; there is no signed-transaction journal or automatic fee replacement. Reports use finalized blocks and intentionally lag execution.
 

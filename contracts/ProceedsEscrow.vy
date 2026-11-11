@@ -1,6 +1,6 @@
 # pragma version ==0.4.3
 # pragma optimize codesize
-"""Sell fresh CRV for crvUSD using its execution week's frozen Yearn share."""
+"""Sell pending CRV using the execution week's frozen vote split."""
 
 from ethereum.ercs import IERC20
 
@@ -62,8 +62,7 @@ CONTROLLER: public(constant(address)) = 0x2F50D538606Fa9EDD2B11E2446BEb18C9D5846
 MINTER: public(constant(address)) = 0xd061D61a4d941c39E5453435B6345Dc261C2fcE0
 VOTER: public(constant(address)) = 0xF147b8125d2ef93FB6965Db97D6746952a133934
 POOL: public(constant(address)) = 0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14
-START: public(immutable(uint256))
-END: public(immutable(uint256))
+DEPLOYED_WEEK: public(immutable(uint256))
 RECEIVER: public(immutable(address))
 
 weeks: public(HashMap[uint256, Week])
@@ -74,20 +73,19 @@ last_sale: public(uint256)
 yearn_receiver: public(address)
 
 @deploy
-def __init__(start: uint256, weeks: uint256):
-    assert start > block.timestamp and start % WEEK == 0, "start"
-    assert weeks > 0 and weeks <= 52, "duration"
-    START = start
-    END = start + weeks * WEEK
+def __init__():
+    DEPLOYED_WEEK = block.timestamp // WEEK * WEEK
     RECEIVER = staticcall Gauge(GAUGE).receiver()
     assert RECEIVER != empty(address), "receiver"
     self.yearn_receiver = self
     self.cooldown = MIN_COOLDOWN
     assert extcall IERC20(CRV).approve(POOL, max_value(uint256)), "approve"
+    if staticcall Controller(CONTROLLER).last_user_vote(VOTER, GAUGE) < DEPLOYED_WEEK:
+        self._checkpoint(DEPLOYED_WEEK)
 
 @internal
 def _snapshot(week: uint256, yearn: uint256, manual: bool):
-    assert week >= START and week < END and week % WEEK == 0 and week <= block.timestamp, "week"
+    assert week >= DEPLOYED_WEEK and week % WEEK == 0 and week <= block.timestamp, "week"
     assert not self.weeks[week].ready, "already captured"
     total: uint256 = (staticcall Controller(CONTROLLER).points_weight(GAUGE, week))[0]
     assert yearn <= total, "weight"
@@ -96,8 +94,6 @@ def _snapshot(week: uint256, yearn: uint256, manual: bool):
 
 @internal
 def _checkpoint(week: uint256) -> uint256:
-    if week < START or week >= END:
-        return 0
     if not self.weeks[week].ready:
         extcall Controller(CONTROLLER).checkpoint_gauge(GAUGE)
         assert staticcall Controller(CONTROLLER).last_user_vote(VOTER, GAUGE) < week, "missing vote history"
@@ -108,7 +104,7 @@ def _checkpoint(week: uint256) -> uint256:
 @external
 @nonreentrant
 def checkpoint() -> uint256:
-    """Freeze the current week's share, even while sales are paused."""
+    """Freeze the current week's share without claiming or selling."""
     return self._checkpoint(block.timestamp // WEEK * WEEK)
 
 @external

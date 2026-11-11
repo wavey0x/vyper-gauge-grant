@@ -52,8 +52,6 @@ def load_config(path):
         "funding",
         "proceeds",
         "deployment_block",
-        "start",
-        "weeks",
         "keeper",
         "min_trade_crv",
         "slippage_bps",
@@ -69,8 +67,6 @@ def load_config(path):
             c[key] = address(c[key])
     for key in [
         "deployment_block",
-        "start",
-        "weeks",
         "slippage_bps",
     ]:
         if c.get(key) is not None and type(c[key]) is not int:
@@ -79,10 +75,6 @@ def load_config(path):
         raise ValueError("Slippage must be between 0 and 9999 bps")
     if units(c["min_trade_crv"]) == 0:
         raise ValueError("Minimum trade must be positive")
-    if not 1 <= c["weeks"] <= 52:
-        raise ValueError("Invalid duration")
-    if c.get("start") is not None and (int(c["start"]) <= 0 or int(c["start"]) % WEEK):
-        raise ValueError("Start must be a Thursday 00:00 UTC timestamp")
     return c
 
 

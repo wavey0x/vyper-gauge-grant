@@ -2,8 +2,6 @@
   "funding": null,
   "proceeds": null,
   "deployment_block": null,
-  "start": null,
-  "weeks": 26,
   "keeper": null,
   "min_trade_crv": "100",
   "slippage_bps": 50,
