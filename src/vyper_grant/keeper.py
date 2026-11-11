@@ -37,10 +37,13 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
             output = read(f.quote(amount))
             minimum = output * (10000 - c["slippage_bps"]) // 10000
             if minimum > 0 and (closing or amount >= units(c["min_trade_crv"])):
-                fn = f.sell(minimum, week, amount)
+                # Allow ordinary claim growth while rejecting a stale oversized sale.
+                max_crv = amount * 4 + 10**18
+                fn = f.sell(minimum, week, amount, max_crv)
                 action = {
                     "status": "sale",
                     "crv": str(amount),
+                    "max_crv": str(max_crv),
                     "week": week,
                     "min_usdc": str(minimum),
                 }

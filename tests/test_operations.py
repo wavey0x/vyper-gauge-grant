@@ -114,7 +114,7 @@ def begin(s):
     s["tester"].time_travel(s["start"] - 180)
     quoted = s["escrow"].functions.claimable().call()
     s["escrow"].functions.sell(
-        0, (s["start"] - 180) // WEEK * WEEK, quoted
+        0, (s["start"] - 180) // WEEK * WEEK, quoted, quoted * 4 + 10**18
     ).transact({"from": s["keeper"]})
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
@@ -147,6 +147,8 @@ def test_keeper_prepares_one_sale_and_report_survives_recovery(chain, tmp_path):
     assert function.fn_name == "sell"
     assert arguments["expected_week"] == s["start"]
     assert arguments["quoted_crv"] == int(result["crv"])
+    assert arguments["max_crv"] == int(result["max_crv"])
+    assert arguments["max_crv"] == arguments["quoted_crv"] * 4 + 10**18
     assert arguments["min_out"] == int(result["min_usdc"])
     assert not s["escrow"].functions.weeks(s["start"]).call()[0]
     submit(s, result)
@@ -314,9 +316,9 @@ def test_programme_end_tail_is_sold_for_vyper_below_minimum(chain, tmp_path):
     end = s["escrow"].functions.END().call()
     s["tester"].time_travel(end - 180)
     quoted = s["escrow"].functions.claimable().call()
-    s["escrow"].functions.sell(0, (end - 180) // WEEK * WEEK, quoted).transact(
-        {"from": s["keeper"]}
-    )
+    s["escrow"].functions.sell(
+        0, (end - 180) // WEEK * WEEK, quoted, quoted * 4 + 10**18
+    ).transact({"from": s["keeper"]})
     s["c"]["min_trade_crv"] = "1000000"
     s["tester"].time_travel(end + 60)
     s["tester"].mine_block()

@@ -143,9 +143,9 @@ def quote(amount: uint256) -> uint256:
 
 @external
 @nonreentrant
-def sell(min_out: uint256, expected_week: uint256, quoted_crv: uint256):
+def sell(min_out: uint256, expected_week: uint256, quoted_crv: uint256, max_crv: uint256):
     assert self.keepers[msg.sender] and not self.paused, "keeper or paused"
-    assert quoted_crv > 0, "quote"
+    assert quoted_crv > 0 and max_crv >= quoted_crv, "quote"
     week: uint256 = block.timestamp // WEEK * WEEK
     assert week == expected_week, "stale week"
     share: uint256 = self._checkpoint(week)
@@ -153,6 +153,7 @@ def sell(min_out: uint256, expected_week: uint256, quoted_crv: uint256):
     extcall Minter(MINTER).mint_for(GAUGE, RECEIVER)
     amount: uint256 = staticcall Token(CRV).balanceOf(RECEIVER) - before
     assert amount > 0, "nothing minted"
+    assert amount <= max_crv, "claim too large"
     assert extcall Token(CRV).transferFrom(RECEIVER, self, amount), "pull"
     before = staticcall Token(USDC).balanceOf(self)
     intermediate: uint256 = extcall Pool(POOL).exchange(2, 0, amount, 0)
