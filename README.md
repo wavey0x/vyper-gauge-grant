@@ -2,7 +2,7 @@
 
 Two Vyper contracts on Ethereum:
 
-- **FundingEscrow** holds USDC, yvUSDC-1 or both and pays exact USDC amounts for future vote weeks. Lifetime spending cannot exceed **100,000 USDC**; yield and recovery never reset the budget.
+- **FundingEscrow** holds USDC, yvUSDC-1 or both. `draw(amount)` pays exact USDC to its configurable recipient and automatically records the upcoming vote week. Lifetime spending cannot exceed **100,000 USDC**; yield and recovery never reset the budget.
 - **ProceedsEscrow** uses `work(min_out, expected_week, quoted_crv, max_crv)` to mint pending gauge rewards, pull only the freshly minted CRV, sell through the fixed CRV → crvUSD → **USDC** route, allocate Yearn's share, and return the rest atomically. Yearn's share accumulates here by default; management can set a receiver for future sales. The contract calculates the **transaction's UTC week** and checks it matches `expected_week`; it does not reconstruct the original earning week.
 
 The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers, the Yearn proceeds receiver, pauses sales and can recover any ERC20 to itself. **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`) can independently claw back any ERC20 held by FundingEscrow, to itself, at any time. The seller has no authority or allowance over funding. Public `checkpoint()` freezes the current funded week's vote share and remains usable while paused. Sales checkpoint automatically. There is no emissions reconstruction or unsold inventory.
@@ -29,7 +29,7 @@ Build updates `abi/contracts.json` and the artifacts in `build/`. Commit generat
 
 ## Deploy and fund
 
-Copy `config/example.json` to `config/live.json`. Set the agreed yCRV OTC **payee**, a future Thursday 00:00 UTC **start**, the duration (1–52 weeks) and a dedicated **keeper**. Mainnet dependencies are constants. Constructors take only `FundingEscrow(payee, start, weeks)` and `ProceedsEscrow(funding)`.
+Copy `config/example.json` to `config/live.json`. Set a future Thursday 00:00 UTC **start**, the duration (1–52 weeks) and a dedicated **keeper**. Mainnet dependencies are constants. Constructors take only `FundingEscrow(start, weeks)` and `ProceedsEscrow(funding)`. The funding recipient defaults to fee burner `0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8`; management can change it with `set-recipient --account ADDRESS`.
 
 ```sh
 uv run vyper-grant deploy funding --deployer YOUR_ADDRESS
@@ -47,7 +47,7 @@ Transfer USDC and/or yvUSDC-1 shares to FundingEscrow. It spends liquid USDC fir
 ## Weekly operation
 
 ```sh
-uv run vyper-grant purchase --week THURSDAY_TIMESTAMP --usdc 2000 --reference 'OTC agreement'
+uv run vyper-grant draw --usdc 2000
 uv run vyper-grant checkpoint          # simulate a public vote snapshot
 uv run vyper-grant checkpoint --send
 uv run vyper-grant quote               # simulate claimable(), then call quote(amount)
@@ -56,7 +56,9 @@ uv run vyper-grant keeper --send
 uv run vyper-grant --out dashboard/dist report
 ```
 
-Purchases assume all of the designated Yearn voter's gauge weight for the week was bought. They do not cast votes or verify the commercial price. Call `checkpoint()` early in each funded week and before replacing Yearn's vote, preferably in the voting Safe's atomic batch. A missing snapshot is also captured by the first sale. If history was overwritten first, `set-missing-weight --week TIMESTAMP` prepares an archival lookup and manager batch for an unset snapshot.
+`draw(amount)` takes only the USDC amount (6 decimals on chain). It pays `recipient()` and records `(block.timestamp // WEEK + 1) * WEEK`, the next Thursday at execution. Multiple draws for that week add together. A delayed draw mined after the boundary funds the following week instead. Each programme week needs its own funding draw, even if votes are only changed every other week.
+
+Funding does not need a vote quantity: the proceeds contract reads the designated Yearn voter's actual gauge weight. The agreement assumes that entire weight belongs to the programme during funded weeks. A draw does not cast votes or verify their commercial price. Call `checkpoint()` early in each funded week and before replacing Yearn's vote, preferably in the voting Safe's atomic batch. A missing snapshot is also captured by the first sale. If history was overwritten first, `set-missing-weight --week TIMESTAMP` prepares an archival lookup and manager batch for an unset snapshot.
 
 `claimable()` checkpoints the gauge and returns pending CRV without minting; use **eth_call** to simulate it. `quote(amount)` is a view returning expected USDC (6 decimals) for a supplied CRV amount (18 decimals), through both pools. The tooling reads both at the same block. The bot discounts the quote by `slippage_bps` and passes that minimum, the current week, quoted CRV amount and maximum CRV amount to `work`. The maximum is four times the quoted claim plus 1 CRV of rounding room. The contract scales the minimum to the amount actually minted, preserving the operator's minimum output **per CRV** if the claim grows before inclusion. A transaction mined in a later week or with a larger claim reverts. It still sells the full claim, with no deadline, oracle floor or partial sale. A failed check rolls back both swaps and the claim.
 
@@ -66,7 +68,7 @@ Schedule `ops/run.sh` every five minutes with `VYPER_GRANT_DIR` and `ETHEREUM_RP
 
 Use one host/signer and a shared output directory for the process lock. A pending nonce prevents another submission. After a response is lost, the next pass reads fresh claimable rewards; there is no signed-transaction journal or automatic fee replacement. Reports use finalized blocks and intentionally lag execution.
 
-`set-keeper --account ADDRESS [--disable]`, `set-paused true|false`, `set-cooldown --seconds INTEGER` (at least 600), and `recover funding|proceeds --token ADDRESS --amount-raw INTEGER` cover management. Cooldown changes apply immediately relative to the last successful sale. `set-yearn-receiver --account ADDRESS` prepares a manager batch to route future Yearn shares there. Use the proceeds contract's own address to resume accumulation. Zero is rejected; existing balances stay where they are and can be recovered separately. Grant conditions and release of held proceeds remain the manager's responsibility.
+`set-recipient --account ADDRESS` changes the recipient of future funding draws. `set-keeper --account ADDRESS [--disable]`, `set-paused true|false`, `set-cooldown --seconds INTEGER` (at least 600), and `recover funding|proceeds --token ADDRESS --amount-raw INTEGER` cover other management. Cooldown changes apply immediately relative to the last successful sale. `set-yearn-receiver --account ADDRESS` prepares a manager batch to route future Yearn shares there. Use the proceeds contract's own address to resume accumulation. Zero is rejected; existing balances stay where they are and can be recovered separately. Grant conditions and release of held proceeds remain the manager's responsibility.
 
 `recover funding --governance --token ADDRESS --amount-raw INTEGER` prepares a **ychad.eth** clawback batch. Recover yvUSDC-1 shares directly to avoid relying on vault redemption. Recovery is independent of programme dates, the seller and the vault's withdrawal availability; it never resets spent budget or reverses payments already made. The governance address is pinned to its ENS resolution verified on November 10, 2026, not resolved dynamically by the contract.
 

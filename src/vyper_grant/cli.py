@@ -39,9 +39,9 @@ def batch(sender, *calls, **meta):
 
 
 def deployment(client, c, name, deployer):
-    if not c.get("payee") or not c.get("start"):
-        raise ValueError("Configure payee and start before deployment")
-    args = [c["payee"], c["start"], c["weeks"]]
+    if not c.get("start"):
+        raise ValueError("Configure start before deployment")
+    args = [c["start"], c["weeks"]]
     if name == "proceeds":
         if not c.get("funding"):
             raise ValueError("Deploy and configure funding first")
@@ -77,7 +77,6 @@ def doctor(client, c):
             "funding",
             "proceeds",
             "deployment_block",
-            "payee",
             "start",
             "keeper",
         ]
@@ -92,6 +91,7 @@ def doctor(client, c):
         f, p = verify(client, c)
         result.update(
             funding_assets=str(f.functions.assets().call()),
+            funding_recipient=f.functions.recipient().call(),
             remaining_budget=str(f.functions.remaining().call()),
             paused=p.functions.paused().call(),
             cooldown=p.functions.cooldown().call(),
@@ -124,8 +124,7 @@ def main():
     d.add_argument("--deployer", required=True)
     s = sub.add_parser("setup")
     s.add_argument("--allowance-crv", required=True)
-    f = sub.add_parser("purchase")
-    f.add_argument("--week", type=int, required=True)
+    f = sub.add_parser("draw")
     f.add_argument("--usdc", required=True)
     f.add_argument("--reference", help="Human-readable Safe description")
     s = sub.add_parser("set-missing-weight")
@@ -143,6 +142,8 @@ def main():
         required=True,
         help="Use the proceeds contract to resume accumulation",
     )
+    r = sub.add_parser("set-recipient")
+    r.add_argument("--account", required=True)
     k = sub.add_parser("set-keeper")
     k.add_argument("--account", required=True)
     k.add_argument("--disable", action="store_true")
@@ -199,7 +200,7 @@ def main():
             )
             return
         else:
-            funding_only = args.command == "purchase" or (
+            funding_only = args.command in ["draw", "set-recipient"] or (
                 args.command == "recover" and args.contract == "funding"
             )
             if funding_only:
@@ -222,8 +223,8 @@ def main():
                     )
                 )
                 return
-            if args.command == "purchase":
-                fn = funding.functions.purchase(args.week, units(args.usdc, 6))
+            if args.command == "draw":
+                fn = funding.functions.draw(units(args.usdc, 6))
                 if args.reference:
                     meta = {"description": args.reference}
             elif args.command == "set-missing-weight":
@@ -247,6 +248,8 @@ def main():
                 ).functions.recover(address(args.token), args.amount_raw)
             elif args.command == "set-yearn-receiver":
                 fn = ef.set_yearn_receiver(address(args.account))
+            elif args.command == "set-recipient":
+                fn = funding.functions.set_recipient(address(args.account))
             elif args.command == "set-keeper":
                 fn = ef.set_keeper(address(args.account), not args.disable)
             elif args.command == "set-cooldown":

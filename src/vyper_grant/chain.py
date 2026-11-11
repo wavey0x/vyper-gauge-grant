@@ -5,14 +5,13 @@ from .core import ADDRESSES, BUDGET, WEEK, artifact, contract, named
 
 
 def verify(client, c, block="latest", names=("funding", "proceeds")):
-    if any(c.get(k) is None for k in {*names, "funding", "payee", "start", "weeks"}):
+    if any(c.get(k) is None for k in {*names, "funding", "start", "weeks"}):
         raise ValueError(
-            "Configure the required contracts, payee, start and weeks first"
+            "Configure the required contracts, start and weeks first"
         )
     contracts = {n: contract(client, n, c.get(n)) for n in names}
     expected = {
         "funding": {
-            "PAYEE": c["payee"],
             "START": c["start"],
             "END": c["start"] + c["weeks"] * WEEK,
         },
@@ -84,18 +83,15 @@ def report(client, c):
     def events(event):
         return logs(client, event, c["deployment_block"], block)
     rows = {}
-    for event in events(funding.events.Purchased()):
+    for event in events(funding.events.Drawn()):
         a = event["args"]
-        if a["week"] in rows:
-            raise ValueError("Duplicate purchase")
-        rows[a["week"]] = dict(
-            week=a["week"],
-            paid=a["usdc"],
-            sold=0,
-            output=0,
-            yearn=0,
-            purchase_tx=Web3.to_hex(event["transactionHash"]),
+        row = rows.setdefault(
+            a["week"], dict(week=a["week"], paid=0, sold=0, output=0, yearn=0, payments=[])
         )
+        row["paid"] += a["usdc"]
+        row["payments"].append(dict(
+            usdc=a["usdc"], recipient=a["recipient"], tx=Web3.to_hex(event["transactionHash"])
+        ))
     forwarded = 0
     for event in events(proceeds.events.Sold()):
         a = event["args"]
@@ -114,7 +110,7 @@ def report(client, c):
             rows[a["week"]][key] += a[field]
     spent = read(funding.functions.spent())
     if sum(r["paid"] for r in rows.values()) != spent:
-        raise ValueError("Purchase ledger mismatch")
+        raise ValueError("Funding ledger mismatch")
     warnings = []
     for week, row in rows.items():
         row.update(named(proceeds.functions.weeks(week), block))
@@ -140,6 +136,7 @@ def report(client, c):
         block=block,
         block_hash=Web3.to_hex(final["hash"]),
         funding=funding.address,
+        funding_recipient=read(funding.functions.recipient()),
         proceeds=proceeds.address,
         yearn_receiver=read(proceeds.functions.yearn_receiver()),
         forwarded_usdc=forwarded,

@@ -65,7 +65,6 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK
         funding = boa.load(
             str(ROOT / "contracts/FundingEscrow.vy"),
-            payee,
             start,
             4,
         )
@@ -93,19 +92,20 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             ctrl.vote_for_gauge_weights(previous_gauge, 0)
             ctrl.vote_for_gauge_weights(A["gauge"], power)
         with boa.env.prank(A["manager"]):
-            for i in range(4):
-                funding.purchase(start + i * WEEK, 1000 * 10**6)
+            assert funding.recipient() == "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8"
+            funding.set_recipient(payee)
+            funding.draw(1000 * 10**6)
             escrow.set_keeper(keeper, True)
-        assert usdc.balanceOf(payee) == 4000 * 10**6
+        assert usdc.balanceOf(payee) == 1000 * 10**6
         assert usdc.balanceOf(funding.address) == 0
-        assert funding.spent() == 4000 * 10**6
+        assert funding.spent() == 1000 * 10**6
         with boa.env.anchor(), boa.env.prank(A["governance"]):
             shares = vault.balanceOf(funding.address)
             before = vault.balanceOf(A["governance"])
             funding.recover(A["vault"], shares)
             assert vault.balanceOf(A["governance"]) == before + shares
             assert vault.balanceOf(funding.address) == 0
-            assert funding.spent() == 4000 * 10**6
+            assert funding.spent() == 1000 * 10**6
 
         def sell():
             with boa.env.anchor():
@@ -153,6 +153,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             assert escrow.claimable() == 0
 
         with boa.env.prank(A["manager"]):
+            funding.draw(1000 * 10**6)
             escrow.set_yearn_receiver(payee)
         boa.env.time_travel(seconds=start + WEEK - 180 - boa.env.evm.patch.timestamp)
         assert sell().week == start
@@ -162,6 +163,8 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         tail = sell()
         assert tail.week == start + WEEK
         assert tail.yearn == tail.usdc * escrow.weeks(start + WEEK).share // 10**18
+        with boa.env.prank(A["manager"]):
+            funding.draw(1000 * 10**6)
 
         # Checkpoint before replacing Yearn's vote, after the real ten-day delay.
         boa.env.time_travel(
@@ -178,6 +181,9 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         )
         assert sell().yearn == 0
         assert escrow.weeks(start + 2 * WEEK).ready
+        with boa.env.prank(A["manager"]):
+            funding.draw(1000 * 10**6)
+        assert funding.spent() == 4000 * 10**6
 
         # The gauge enforces its own cap; there is no local cap/rate accounting.
         with boa.env.anchor():

@@ -83,7 +83,6 @@ def chain(monkeypatch):
     start = (client.eth.get_block("latest").timestamp // WEEK + 1) * WEEK
     c = json.loads((ROOT / "config/example.json").read_text())
     c.update(
-        payee=payee,
         start=start,
         weeks=4,
         keeper=keeper,
@@ -108,7 +107,7 @@ def chain(monkeypatch):
 
 
 def begin(s):
-    s["funding"].functions.purchase(s["start"], 1000 * 10**6).transact(
+    s["funding"].functions.draw(1000 * 10**6).transact(
         {"from": s["manager"]}
     )
     s["tester"].time_travel(s["start"] - 180)
@@ -132,8 +131,8 @@ def test_verified_contracts_and_idempotent_setup(chain):
     vyper, manager = setup(s["client"], s["c"], 10**25)
     assert len(vyper["transactions"]) == len(manager["transactions"]) == 1
     assert doctor(s["client"], s["c"])["mint_enabled"]
-    with pytest.raises(ValueError, match="PAYEE"):
-        verify(s["client"], {**s["c"], "payee": s["keeper"]})
+    with pytest.raises(ValueError, match="START"):
+        verify(s["client"], {**s["c"], "start": s["start"] + WEEK})
     with pytest.raises(ValueError, match="bytecode"):
         verify(s["client"], {**s["c"], "funding": s["gauge"].address})
 
@@ -249,7 +248,7 @@ def test_checkpoint_retries_while_paused_and_explicit_command_is_public(
     chain, tmp_path
 ):
     s = chain
-    s["funding"].functions.purchase(s["start"], 1).transact({"from": s["manager"]})
+    s["funding"].functions.draw(1).transact({"from": s["manager"]})
     s["escrow"].functions.set_paused(True).transact({"from": s["manager"]})
     s["tester"].time_travel(s["start"] + 1)
     s["tester"].mine_block()
@@ -265,6 +264,37 @@ def test_checkpoint_retries_while_paused_and_explicit_command_is_public(
     explicit = run(s["client"], s["c"], directory=tmp_path, checkpoint_only=True)
     submit(s, explicit)
     assert explicit["status"] == "checkpoint"
+
+
+def test_draw_cli_and_report_record_each_recipient(chain, tmp_path, monkeypatch):
+    s = chain
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({**s["c"], "proceeds": None}))
+    monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
+
+    def execute(*args):
+        monkeypatch.setattr("sys.argv", [
+            "vyper-grant", "--config", str(config), "--out", str(tmp_path), *args
+        ])
+        main()
+        prepared = json.loads((tmp_path / (args[0] + ".json")).read_text())
+        assert prepared["meta"]["safeAddress"] == s["manager"]
+        tx = prepared["transactions"][0]
+        s["client"].eth.send_transaction({
+            "from": s["manager"], "to": tx["to"], "data": tx["data"]
+        })
+
+    burner = s["funding"].functions.recipient().call()
+    execute("draw", "--usdc", "10")
+    execute("set-recipient", "--account", s["payee"])
+    execute("draw", "--usdc", "20")
+    assert s["usdc"].functions.balanceOf(burner).call() == 10 * 10**6
+    assert s["usdc"].functions.balanceOf(s["payee"]).call() == 20 * 10**6
+    data = report(s["client"], s["c"])
+    assert data["spent"] == data["weeks"][0]["paid"] == str(30 * 10**6)
+    assert data["weeks"][0]["week"] == str(s["start"])
+    assert [p["recipient"] for p in data["weeks"][0]["payments"]] == [burner, s["payee"]]
+    assert data["funding_recipient"] == s["payee"]
 
 
 def test_archive_read_excludes_boundary_block_revote(chain):

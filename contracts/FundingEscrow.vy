@@ -1,5 +1,5 @@
 # pragma version ==0.4.3
-"""A fixed USDC budget held as USDC or yvUSDC-1. One payment per future week."""
+"""Draw USDC from a fixed budget for the upcoming vote week."""
 
 interface Token:
     def balanceOf(account: address) -> uint256: view
@@ -9,10 +9,13 @@ interface Vault:
     def convertToAssets(shares: uint256) -> uint256: view
     def withdraw(assets: uint256, receiver: address, owner: address, max_loss: uint256) -> uint256: nonpayable
 
-event Purchased:
+event Drawn:
     week: indexed(uint256)
     usdc: uint256
-    shares: uint256
+    recipient: address
+
+event RecipientSet:
+    recipient: address
 
 event Recovered:
     token: indexed(address)
@@ -25,18 +28,17 @@ VAULT: public(constant(address)) = 0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204
 USDC: public(constant(address)) = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 MANAGER: public(constant(address)) = 0x4444AAAACDBa5580282365e25b16309Bd770ce4a
 GOVERNANCE: public(constant(address)) = 0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52
-PAYEE: public(immutable(address))
 START: public(immutable(uint256))
 END: public(immutable(uint256))
+recipient: public(address)
 spent: public(uint256)
 paid: public(HashMap[uint256, uint256])
 
 @deploy
-def __init__(payee: address, start: uint256, weeks: uint256):
-    assert payee != empty(address), "address"
+def __init__(start: uint256, weeks: uint256):
     assert start > block.timestamp and start % WEEK == 0, "start"
     assert weeks > 0 and weeks <= 52, "duration"
-    PAYEE = payee
+    self.recipient = 0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8
     START = start
     END = start + weeks * WEEK
 
@@ -52,22 +54,29 @@ def remaining() -> uint256:
 
 @external
 @nonreentrant
-def purchase(week: uint256, amount: uint256):
+def draw(amount: uint256):
     assert msg.sender == MANAGER, "manager"
-    assert week >= START and week < END and week % WEEK == 0, "week"
-    assert week > block.timestamp and self.paid[week] == 0, "future unpaid week"
+    week: uint256 = (block.timestamp // WEEK + 1) * WEEK
+    assert week >= START and week < END, "week"
     assert amount > 0 and self.spent + amount <= BUDGET, "budget"
-    self.paid[week] = amount
+    self.paid[week] += amount
     self.spent += amount
-    before: uint256 = staticcall Token(USDC).balanceOf(PAYEE)
+    recipient: address = self.recipient
+    before: uint256 = staticcall Token(USDC).balanceOf(recipient)
     liquid: uint256 = min(amount, staticcall Token(USDC).balanceOf(self))
     if liquid > 0:
-        assert extcall Token(USDC).transfer(PAYEE, liquid), "transfer"
-    shares: uint256 = 0
+        assert extcall Token(USDC).transfer(recipient, liquid), "transfer"
     if liquid < amount:
-        shares = extcall Vault(VAULT).withdraw(amount - liquid, PAYEE, self, 0)
-    assert staticcall Token(USDC).balanceOf(PAYEE) - before == amount, "payment"
-    log Purchased(week=week, usdc=amount, shares=shares)
+        extcall Vault(VAULT).withdraw(amount - liquid, recipient, self, 0)
+    assert staticcall Token(USDC).balanceOf(recipient) - before == amount, "payment"
+    log Drawn(week=week, usdc=amount, recipient=recipient)
+
+@external
+def set_recipient(recipient: address):
+    assert msg.sender == MANAGER, "manager"
+    assert recipient != empty(address) and recipient != self, "recipient"
+    self.recipient = recipient
+    log RecipientSet(recipient=recipient)
 
 @external
 @nonreentrant

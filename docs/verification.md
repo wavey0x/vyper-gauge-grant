@@ -1,6 +1,6 @@
 # Verification
 
-Verified November 11, 2026: **53 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent.
+Verified November 11, 2026: **55 tests passed**, including an Ethereum fork at block **26,379,075**. No live transaction was sent.
 
 ```sh
 uv sync --extra dev
@@ -21,6 +21,8 @@ Both contracts compile with Vyper 0.4.3 and generated ABI/bytecode matches the s
 
 Cooldown tests verify the 600-second default and hard floor, manager permissions, a shared interval across keepers, the exact eligibility boundary, and `canWork()` while paused. Failed sales leave `last_sale` unchanged. A public checkpoint can capture the new week while the cooldown is active. Operations tests verify that the keeper waits, that the final cleanup still bypasses the trade minimum after the cooldown, and that the CLI prepares a working manager cooldown update.
 
-FundingEscrow is **77 lines** with a **2,721-byte** runtime. Direct USDC support added no mutable state or seller dependency. ProceedsEscrow is **214 lines**, down from the earlier 275-line design, with a **7,099-byte** runtime versus 9,077. Its mutable state is weekly captured/share records, keeper permissions, the pause flag, Yearn's receiver, the cooldown and the last successful sale timestamp. No accrual baselines, inflation rates, caps, inventories, cursors or lifetime accounting totals remain. A funded share is captured once; ordinary sales write only the cooldown timestamp in escrow storage.
+Funding tests verify that `draw(amount)` selects the upcoming week, including at the exact boundary, accumulates repeat draws, preserves the lifetime budget, and pays the fee burner by default. Only management can change the recipient; zero and self are rejected. CLI tests execute draws and recipient changes without a proceeds contract configured, then verify the weekly report totals and each payment's actual recipient. The mainnet fork changes the recipient and funds successive weeks with the new draw API.
+
+FundingEscrow is **86 lines** with a **2,978-byte** runtime. Its mutable state is the recipient, lifetime spending and weekly paid amounts; it has no seller dependency or vote-quantity accounting. ProceedsEscrow is **214 lines**, down from the earlier 275-line design, with a **7,099-byte** runtime versus 9,077. Its mutable state is weekly captured/share records, keeper permissions, the pause flag, Yearn's receiver, the cooldown and the last successful sale timestamp. No accrual baselines, inflation rates, caps, inventories, cursors or lifetime accounting totals remain. A funded share is captured once; ordinary sales write only the cooldown timestamp in escrow storage.
 
 These checks verify claim-week settlement, not exact earning-week attribution or compliance with the operating agreement. Closing sales are best effort, external claimers must stop, and substantial outages require reconciliation. `claimable()` uses eth_call to simulate the gauge checkpoint; `quote(amount)` is a separate view. Tests verify that quoting leaves the gauge untouched and claimable checkpoints without minting. No live deployment is recorded; fresh deployment is required. See [accounting](accounting.md) for the accepted assumptions.

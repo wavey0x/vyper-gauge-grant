@@ -53,7 +53,6 @@ def load_config(path):
         "funding",
         "proceeds",
         "deployment_block",
-        "payee",
         "start",
         "weeks",
         "keeper",
@@ -66,7 +65,7 @@ def load_config(path):
             "Unknown or obsolete configuration fields: "
             + ", ".join(sorted(set(c) - allowed))
         )
-    for key in ["funding", "proceeds", "payee", "keeper"]:
+    for key in ["funding", "proceeds", "keeper"]:
         if c.get(key):
             c[key] = address(c[key])
     for key in [

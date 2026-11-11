@@ -49,13 +49,14 @@ def deploy_mocks():
 @pytest.fixture
 def system():
     manager, receiver, voter = A["manager"], A["receiver"], A["voter"]
-    payee, keeper, stranger = [boa.env.generate_address() for _ in range(3)]
+    keeper, stranger = [boa.env.generate_address() for _ in range(2)]
     mocks = deploy_mocks()
     usdc, crv, crvusd, vault, gauge, controller, minter, pool, stable_pool = (
         mocks.values()
     )
     start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK
-    funding = boa.load(str(ROOT / "contracts/FundingEscrow.vy"), payee, start, 8)
+    funding = boa.load(str(ROOT / "contracts/FundingEscrow.vy"), start, 8)
+    payee = funding.recipient()
     usdc.mint(manager, 100_000 * 10**6)
     with boa.env.prank(manager):
         usdc.approve(vault.address, 100_000 * 10**6)
