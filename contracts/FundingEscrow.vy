@@ -1,9 +1,7 @@
 # pragma version ==0.4.3
 """Hold yvUSDC-1 and let Yearn draw USDC to its chosen recipient."""
 
-interface Token:
-    def balanceOf(account: address) -> uint256: view
-    def transfer(to: address, amount: uint256) -> bool: nonpayable
+from ethereum.ercs import IERC20
 
 interface Vault:
     def convertToAssets(shares: uint256) -> uint256: view
@@ -33,7 +31,7 @@ def __init__():
 @external
 @view
 def assets() -> uint256:
-    return staticcall Vault(VAULT).convertToAssets(staticcall Token(VAULT).balanceOf(self))
+    return staticcall Vault(VAULT).convertToAssets(staticcall IERC20(VAULT).balanceOf(self))
 
 @external
 @nonreentrant
@@ -55,5 +53,5 @@ def set_recipient(recipient: address):
 @nonreentrant
 def recover(token: address, amount: uint256):
     assert msg.sender == MANAGER or msg.sender == GOVERNANCE, "management"
-    assert extcall Token(token).transfer(msg.sender, amount, default_return_value=True), "transfer"
+    assert extcall IERC20(token).transfer(msg.sender, amount, default_return_value=True), "transfer"
     log Recovered(token=token, amount=amount, receiver=msg.sender)

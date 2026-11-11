@@ -2,11 +2,7 @@
 # pragma optimize codesize
 """Sell each fresh CRV claim using its execution week's frozen Yearn share."""
 
-interface Token:
-    def balanceOf(account: address) -> uint256: view
-    def approve(spender: address, amount: uint256) -> bool: nonpayable
-    def transfer(to: address, amount: uint256) -> bool: nonpayable
-    def transferFrom(owner: address, to: address, amount: uint256) -> bool: nonpayable
+from ethereum.ercs import IERC20
 
 interface Controller:
     def checkpoint_gauge(gauge: address): nonpayable
@@ -91,8 +87,8 @@ def __init__(start: uint256, weeks: uint256):
     assert RECEIVER != empty(address), "receiver"
     self.yearn_receiver = self
     self.cooldown = MIN_COOLDOWN
-    assert extcall Token(CRV).approve(POOL, max_value(uint256)), "approve"
-    assert extcall Token(CRVUSD).approve(STABLE_POOL, max_value(uint256)), "approve"
+    assert extcall IERC20(CRV).approve(POOL, max_value(uint256)), "approve"
+    assert extcall IERC20(CRVUSD).approve(STABLE_POOL, max_value(uint256)), "approve"
 
 @internal
 def _snapshot(week: uint256, yearn: uint256, manual: bool):
@@ -155,22 +151,20 @@ def work(min_out: uint256, expected_week: uint256, quoted_crv: uint256, max_crv:
     week: uint256 = block.timestamp // WEEK * WEEK
     assert week == expected_week, "stale week"
     share: uint256 = self._checkpoint(week)
-    before: uint256 = staticcall Token(CRV).balanceOf(RECEIVER)
+    before: uint256 = staticcall IERC20(CRV).balanceOf(RECEIVER)
     extcall Minter(MINTER).mint_for(GAUGE, RECEIVER)
-    amount: uint256 = staticcall Token(CRV).balanceOf(RECEIVER) - before
+    amount: uint256 = staticcall IERC20(CRV).balanceOf(RECEIVER) - before
     assert amount > 0, "nothing minted"
     assert amount <= max_crv, "claim too large"
-    assert extcall Token(CRV).transferFrom(RECEIVER, self, amount), "pull"
-    before = staticcall Token(USDC).balanceOf(self)
+    assert extcall IERC20(CRV).transferFrom(RECEIVER, self, amount), "pull"
     intermediate: uint256 = extcall Pool(POOL).exchange(2, 0, amount, 0)
-    extcall StablePool(STABLE_POOL).exchange(1, 0, intermediate, min_out * amount // quoted_crv)
-    output: uint256 = staticcall Token(USDC).balanceOf(self) - before
+    output: uint256 = extcall StablePool(STABLE_POOL).exchange(1, 0, intermediate, min_out * amount // quoted_crv)
     yearn: uint256 = output * share // SCALE
     receiver: address = self.yearn_receiver
     if yearn > 0 and receiver != self:
-        assert extcall Token(USDC).transfer(receiver, yearn), "forward"
+        assert extcall IERC20(USDC).transfer(receiver, yearn), "forward"
     if output > yearn:
-        assert extcall Token(USDC).transfer(RECEIVER, output - yearn), "return"
+        assert extcall IERC20(USDC).transfer(RECEIVER, output - yearn), "return"
     self.last_sale = block.timestamp
     log Sold(week=week, crv=amount, usdc=output, yearn=yearn, yearn_receiver=receiver)
 
@@ -203,5 +197,5 @@ def set_paused(paused: bool):
 @nonreentrant
 def recover(token: address, amount: uint256):
     assert msg.sender == MANAGER, "manager"
-    assert extcall Token(token).transfer(MANAGER, amount, default_return_value=True), "transfer"
+    assert extcall IERC20(token).transfer(MANAGER, amount, default_return_value=True), "transfer"
     log Recovered(token=token, amount=amount)
