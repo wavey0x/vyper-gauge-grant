@@ -2,13 +2,15 @@
 
 ## Funding
 
-FundingEscrow holds yvUSDC-1. `draw(amount)` calls the fixed vault's `withdraw(amount, recipient, self, 0)`. The vault calculates the shares to burn, rounding up, and sends the requested USDC directly to the recipient. Zero permitted loss means a shortfall reverts; a failed withdrawal also rolls back the weekly payment record. The escrow relies on the vault's withdrawal semantics instead of duplicating share conversion or checking recipient balances. The recipient defaults to fee burner `0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8`. Only the manager can change it, and zero or the funding contract itself is rejected.
+FundingEscrow holds yvUSDC-1. `draw(amount)` calls the fixed vault's `withdraw(amount, recipient, self, 0)`. The vault calculates the shares to burn, rounding up, and sends the requested USDC directly to the recipient. Zero permitted loss means a shortfall reverts. A successful draw emits its amount and recipient; a failed draw records no payment. The escrow relies on the vault's withdrawal semantics instead of duplicating share conversion or checking recipient balances. The recipient defaults to fee burner `0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8`. Only the manager can change it, and zero or the funding contract itself is rejected.
 
-The week is always the next Thursday at execution: `(block.timestamp // 604800 + 1) * 604800`. It must lie within the programme. Multiple draws add to `paid[week]`. There is no budget cap or lifetime spending counter; yield and additional shares remain available for future draws. A transaction that crosses a Thursday boundary will fund the next week. There is no vote-quantity input; proceeds use the voter's weight from Curve. Funding remains weekly even when Yearn votes every other week. `assets()` reports only the vault's converted share balance. Loose USDC is recoverable but is neither drawn nor counted as vault funding.
+Funding has no programme dates, week calculation, payment mapping or spending cap. Draws can happen fortnightly, be delayed or include additional payments; their timing never changes proceeds eligibility. Yield and additional shares remain available for future draws. `assets()` reports only the vault's converted share balance. Loose USDC is recoverable but is neither drawn nor counted as vault funding.
 
 Funding has no seller allowance, swap logic or keeper permissions. Only the fixed `0x4444…ce4a` manager can draw. That manager and governance **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`, resolved on Ethereum November 10, 2026) can recover any ERC20 to the caller at any time. Share recovery needs no vault redemption and is unaffected by sale pauses or programme dates. Already-paid USDC cannot be clawed back from the recipient.
 
 ## Claim-week settlement
+
+ProceedsEscrow takes its own Thursday-aligned start and duration at deployment and has no funding address or payment checks. Every active week uses the designated Yearn voter's full weight on the gauge. This is the operating agreement, independent of whether payment has occurred; recovering funding does not stop proceeds. Early termination requires coordination and pausing sales while reconciling.
 
 A sale uses `week = block.timestamp // 604800 * 604800`. There is no attempt to identify when each CRV unit was earned. The operating agreement is that Vyper and other authorised claimers leave claims and sales to this automation, which runs regularly and clears pending rewards near each week's end. Small carryover receives the following week's split. Missed periods and independent claims require operational reconciliation before normal sales resume; the contract does not detect those breaches.
 
@@ -18,11 +20,11 @@ A sale uses `week = block.timestamp // 604800 * 604800`. There is no attempt to 
 
 The fixed pools are [TriCRV](https://etherscan.io/address/0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14#code), indices 2 → 0, and [crvUSD/USDC](https://etherscan.io/address/0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E#code), indices 1 → 0. Pool assets and interfaces were verified on Ethereum and the route is exercised on a mainnet fork. The first hop has no separate minimum. The final hop requires `min_out * actual_minted_crv // quoted_crv` in **6-decimal USDC units**, so the minimum per CRV remains valid if the claim grows. If the larger trade has worse natural price impact, it may revert and need a fresh quote. crvUSD is a transient intermediate, not the settlement asset.
 
-Before START, at or after END, and in any unpaid week, Yearn's share is zero and all output returns to Vyper. Pre-start sales clear historical pending emissions without appropriating them. A final pre-end sale minimizes carryover; the post-end cleanup returns its whole output to Vyper under the same claim-week rule. Automation must be stopped and claim responsibility handed back afterward.
+Before START and at or after END, Yearn's share is zero and all output returns to Vyper. Pre-start sales clear historical pending emissions without appropriating them. A final pre-end sale minimizes carryover; the post-end cleanup returns its whole output to Vyper under the same claim-week rule. Automation must be stopped and claim responsibility handed back afterward.
 
 ## Weekly share
 
-For funded weeks, `checkpoint()` obtains:
+For programme weeks, `checkpoint()` obtains:
 
 ```text
 Yearn weight = effective_vote.slope * max(effective_vote.end - week, 0)
@@ -31,9 +33,9 @@ share = floor(Yearn weight * 1e18 / total weight)
 yearn = floor(actual USDC output * share / 1e18)
 ```
 
-A zero total requires zero Yearn weight and gives zero share. Division rounding goes to Vyper. Each funded week stores only a captured flag and its fixed-point share; the Snapshot event records both original weights.
+A zero total requires zero Yearn weight and gives zero share. Division rounding goes to Vyper. Each programme week stores only a captured flag and its fixed-point share; the Snapshot event records both original weights.
 
-The [Curve controller](https://github.com/curvefi/curve-dao-contracts/blob/master/contracts/GaugeController.vy) overwrites the latest voter record immediately when a vote changes, although the new vote takes effect next week. Capture before a revote. Public checkpointing is idempotent and works at the exact boundary, with no claim and while paused. Automatic capture requires `last_user_vote < week`. The manager can fill an unset funded snapshot through `set_missing_weight(week, weight)`; the contract reads the historical denominator and bounds the supplied weight. This is a trusted assertion, not a storage proof.
+The [Curve controller](https://github.com/curvefi/curve-dao-contracts/blob/master/contracts/GaugeController.vy) overwrites the latest voter record immediately when a vote changes, although the new vote takes effect next week. Capture before a revote. Public checkpointing is idempotent and works at the exact boundary, with no claim and while paused. Automatic capture requires `last_user_vote < week`. The manager can fill an unset programme snapshot through `set_missing_weight(week, weight)`; the contract reads the historical denominator and bounds the supplied weight. This is a trusted assertion, not a storage proof.
 
 ## Quotes and records
 
@@ -43,4 +45,4 @@ The keeper chooses a positive `min_out` from the full-claim quote and supplies t
 
 Every successful sale records `last_sale`. All keepers share a cooldown, initially 600 seconds; only the manager can change it, with a hard floor of 600 seconds. Changes apply relative to the last sale without resetting that timestamp. A failed sale does not consume the interval. `canWork()` returns whether sales are unpaused and the interval has elapsed; it is independent of the caller and does not promise that a claim or swap will succeed. Checkpointing remains public during the wait. The keeper skips quoting until ready and allows the final cleanup within one cooldown plus five minutes after END. There is no exception to the cooldown at week boundaries.
 
-Drawn and Sold events provide the report ledger. Each Drawn event records the week, USDC amount and recipient; reports derive total spending from these events, sum weekly draws and retain each payment's recipient and transaction. Each Sold event records USDC output, Yearn's amount and its receiver. Rows describe **claim-week settlements**, not precisely reconstructed earnings or a proof that every reward was collected. Closed means the calendar week ended. Current balances come from token/vault reads. Yearn's total allocation, automatically forwarded USDC and management withdrawals are reported separately; an external receiver does not make forwarded amounts appear held in escrow. The manager can recover any ERC20, including while paused; neither escrow enforces grant milestones.
+Drawn and Sold events provide separate report ledgers. Each Drawn event records the USDC amount and recipient; reports derive total spending from these events and retain each payment's block timestamp and transaction. Payments are never assigned to vote weeks. Weekly rows describe **claim-week settlements**, not precisely reconstructed earnings or a proof that every reward was collected. Programme dates determine active weeks and missing-snapshot warnings. Each Sold event records USDC output, Yearn's amount and its receiver. Closed means the calendar week ended. Current balances come from token/vault reads. Yearn's total allocation, automatically forwarded USDC and management withdrawals are reported separately; an external receiver does not make forwarded amounts appear held in escrow. The manager can recover any ERC20, including while paused; neither escrow enforces grant milestones.

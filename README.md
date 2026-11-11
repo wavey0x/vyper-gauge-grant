@@ -1,19 +1,21 @@
 # Vyper funding
 
-Two Vyper contracts on Ethereum:
+Two independent Vyper contracts on Ethereum:
 
-- **FundingEscrow** holds yvUSDC-1. `draw(amount)` withdraws the requested USDC directly to its configurable recipient and automatically records the upcoming vote week. There is no lifetime spending cap; available vault shares fund each draw.
+- **FundingEscrow** holds yvUSDC-1. `draw(amount)` withdraws the requested USDC directly to its configurable recipient. There are no programme dates, weekly records or lifetime spending cap; available vault shares fund each draw.
 - **ProceedsEscrow** uses `work(min_out, expected_week, quoted_crv, max_crv)` to mint pending gauge rewards, pull only the freshly minted CRV, sell through the fixed CRV → crvUSD → **USDC** route, allocate Yearn's share, and return the rest atomically. Yearn's share accumulates here by default; management can set a receiver for future sales. The contract calculates the **transaction's UTC week** and checks it matches `expected_week`; it does not reconstruct the original earning week.
 
-The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers, the Yearn proceeds receiver, pauses sales and can recover any ERC20 to itself. **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`) can independently claw back any ERC20 held by FundingEscrow, to itself, at any time. The seller has no authority or allowance over funding. Public `checkpoint()` freezes the current funded week's vote share and remains usable while paused. Sales checkpoint automatically. There is no emissions reconstruction or unsold inventory.
+The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers, the Yearn proceeds receiver, pauses sales and can recover any ERC20 to itself. **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`) can independently claw back any ERC20 held by FundingEscrow, to itself, at any time. Neither contract calls or knows the other. Public `checkpoint()` freezes the current programme week's vote share and remains usable while paused. Sales checkpoint automatically. There is no emissions reconstruction or unsold inventory.
 
-The [dashboard](dashboard/demo/index.html) has two balances and one table of settlement by claim week. Its [preview](dashboard/preview.png) uses illustrative data. See [accounting](docs/accounting.md) and [verification](docs/verification.md).
+The [dashboard](dashboard/demo/index.html) has two balances, weekly proceeds and an expandable list of dated funding payments. Its [preview](dashboard/preview.png) uses illustrative data. See [accounting](docs/accounting.md) and [verification](docs/verification.md).
 
 ## Operating agreement
 
 Vyper delegates this gauge's claims and CRV sales to the automation and stops independent claims, sales and other CRV transactions during the programme. Other approved claimers must also stop. Existing CRV in the multisig is left untouched.
 
-Start automation before the first funded week and clear historical pending rewards near its start. During unfunded weeks, before the programme and after its end, the whole swap output returns to Vyper. Funded weeks retain the frozen Yearn vote share. Both sides accept small amounts crossing rollover being split using the new week's share.
+All of the designated Yearn voter's weight on this gauge belongs to the programme during ProceedsEscrow's active dates. Funding can be drawn fortnightly or on another agreed schedule; missing or delayed payments and funding recovery do not disable Yearn's allocation. Ending the arrangement early requires operational coordination and pausing sales while reconciling.
+
+Start automation before the programme and clear historical pending rewards near its start. Before START and at or after END, the whole swap output returns to Vyper. Every programme week retains its frozen Yearn vote share. Both sides accept small amounts crossing rollover being split using the new week's share.
 
 Run frequently and make a best-effort **claim and sale in the last five minutes before Thursday 00:00 UTC**, allowing for the sale cooldown. A checkpoint alone does not clear pending rewards. After a substantial outage or an independent claim, stop normal automation and reconcile with Vyper before restarting. The contract does not detect stale claims, reconstruct missed weeks or recover rewards another caller already minted. Those balances remain with Vyper.
 
@@ -29,25 +31,25 @@ Build updates `abi/contracts.json` and the artifacts in `build/`. Commit generat
 
 ## Deploy and fund
 
-Copy `config/example.json` to `config/live.json`. Set a future Thursday 00:00 UTC **start**, the duration (1–52 weeks) and a dedicated **keeper**. Mainnet dependencies are constants. Constructors take only `FundingEscrow(start, weeks)` and `ProceedsEscrow(funding)`. The funding recipient defaults to fee burner `0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8`; management can change it with `set-recipient --account ADDRESS`.
+Copy `config/example.json` to `config/live.json`. For proceeds, set a future Thursday 00:00 UTC **start**, the duration (1–52 weeks) and a dedicated **keeper**. Mainnet dependencies are constants. Constructors are `FundingEscrow()` and `ProceedsEscrow(start, weeks)`; either contract can be deployed first. The funding recipient defaults to fee burner `0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8`; management can change it with `set-recipient --account ADDRESS`.
 
 ```sh
 uv run vyper-grant deploy funding --deployer YOUR_ADDRESS
-# Submit with your signer; record funding and deployment_block in config.
+# Submit with your signer; record funding in config.
 uv run vyper-grant deploy proceeds --deployer YOUR_ADDRESS
-# Record proceeds, then verify:
+# Record proceeds and the earliest deployment_block for the combined report, then verify:
 uv run vyper-grant doctor
 uv run vyper-grant setup --allowance-crv AGREED_CRV_ALLOWANCE
 ```
 
-Deployments and manager operations prepare unsigned transactions or Safe batches. Vyper grants the CRV allowance and mint permission; Yearn enables the keeper. There is no activation transaction or historical accrual baseline. Run `doctor` at setup; ordinary keeper/report passes do not repeat full deployment verification. Ensure the pre-start closing sale succeeds before entering the first funded week.
+Deployments and manager operations prepare unsigned transactions or Safe batches. Vyper grants the CRV allowance and mint permission; Yearn enables the keeper. Funding operations need no proceeds address or start date; proceeds deployment, setup, management and the keeper need no funding address. The combined dashboard report reads both contracts. There is no activation transaction or historical accrual baseline. Run `doctor` at setup; ordinary keeper/report passes do not repeat full deployment verification. Ensure the pre-start closing sale succeeds before entering the programme.
 
 Transfer yvUSDC-1 shares to FundingEscrow. The vault is `0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204`; `previewWithdraw(amount)` gives the shares needed for a USDC amount at the current price. Each draw calls `withdraw(amount, recipient, self, 0)`, letting the vault calculate and burn the required shares with zero permitted loss. `assets()` reports the USDC value of the remaining shares, including yield. Loose USDC is not used by draws or included in that value; it can be recovered through management.
 
-## Weekly operation
+## Payments and weekly operation
 
 ```sh
-uv run vyper-grant draw --usdc 2000
+uv run vyper-grant draw --usdc 2000    # when payment is due, e.g. fortnightly
 uv run vyper-grant checkpoint          # simulate a public vote snapshot
 uv run vyper-grant checkpoint --send
 uv run vyper-grant quote               # simulate claimable(), then call quote(amount)
@@ -56,9 +58,9 @@ uv run vyper-grant keeper --send
 uv run vyper-grant --out dashboard/dist report
 ```
 
-`draw(amount)` takes only the USDC amount (6 decimals on chain). It pays `recipient()` and records `(block.timestamp // WEEK + 1) * WEEK`, the next Thursday at execution. Multiple draws for that week add together. A delayed draw mined after the boundary funds the following week instead. Each programme week needs its own funding draw, even if votes are only changed every other week.
+`draw(amount)` takes only the USDC amount (6 decimals on chain). It pays `recipient()` and emits a payment event. It can be called at any time and does not assign payments to vote weeks. The dashboard records actual payment dates separately from weekly proceeds.
 
-Funding does not need a vote quantity: the proceeds contract reads the designated Yearn voter's actual gauge weight. The agreement assumes that entire weight belongs to the programme during funded weeks. A draw does not cast votes or verify their commercial price. Call `checkpoint()` early in each funded week and before replacing Yearn's vote, preferably in the voting Safe's atomic batch. A missing snapshot is also captured by the first sale. If history was overwritten first, `set-missing-weight --week TIMESTAMP` prepares an archival lookup and manager batch for an unset snapshot.
+The proceeds contract reads the designated Yearn voter's actual gauge weight every week, independently of payments. A draw does not cast votes or verify their commercial price. Call `checkpoint()` early in each programme week and before replacing Yearn's vote, preferably in the voting Safe's atomic batch. A missing snapshot is also captured by the first sale. If history was overwritten first, `set-missing-weight --week TIMESTAMP` prepares an archival lookup and manager batch for an unset snapshot.
 
 `claimable()` checkpoints the gauge and returns pending CRV without minting; use **eth_call** to simulate it. `quote(amount)` is a view returning expected USDC (6 decimals) for a supplied CRV amount (18 decimals), through both pools. The tooling reads both at the same block. The bot discounts the quote by `slippage_bps` and passes that minimum, the current week, quoted CRV amount and maximum CRV amount to `work`. The maximum is four times the quoted claim plus 1 CRV of rounding room. The contract scales the minimum to the amount actually minted, preserving the operator's minimum output **per CRV** if the claim grows before inclusion. A transaction mined in a later week or with a larger claim reverts. It still sells the full claim, with no deadline, oracle floor or partial sale. A failed check rolls back both swaps and the claim.
 

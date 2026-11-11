@@ -1,12 +1,10 @@
 import boa
 import pytest
-from conftest import WEEK, UNIT, advance
+from conftest import ROOT, WEEK, UNIT, advance
 
 
 def begin(s):
-    with boa.env.prank(s.manager):
-        s.funding.draw(1000 * 10**6)
-    # Clear historical rewards just before the first funded week.
+    # Clear historical rewards just before the programme starts.
     advance(s.start - 60)
     sale(s)
     advance(s.start + 3600)
@@ -62,7 +60,6 @@ def test_draw_can_use_yield_and_topups_without_a_lifetime_cap(system):
         s.usdc.approve(s.vault.address, 22_000 * 10**6)
         s.vault.deposit(22_000 * 10**6, s.funding.address)
         s.funding.draw(22_000 * 10**6)
-    assert s.funding.paid(s.start) == 132_000 * 10**6
     assert s.usdc.balanceOf(s.payee) == 132_000 * 10**6
     assert s.funding.assets() == 0
 
@@ -73,7 +70,7 @@ def test_failed_withdrawal_does_not_record_payment(system):
     s.vault.configure(UNIT, True)
     with boa.env.prank(s.manager), boa.reverts("withdrawal"):
         s.funding.draw(100 * 10**6)
-    assert s.funding.paid(s.start) == s.usdc.balanceOf(s.payee) == 0
+    assert s.usdc.balanceOf(s.payee) == 0
     assert s.vault.balanceOf(s.funding.address) == shares
 
 
@@ -88,7 +85,7 @@ def test_draw_withdraws_exact_usdc_and_leaves_loose_tokens_untouched(system):
     burned = (amount * UNIT + s.vault.price() - 1) // s.vault.price()
     with boa.env.prank(s.manager):
         s.funding.draw(amount)
-    assert s.usdc.balanceOf(s.payee) == s.funding.paid(s.start) == amount
+    assert s.usdc.balanceOf(s.payee) == amount
     assert s.usdc.balanceOf(s.funding.address) == 100 * 10**6
     assert s.vault.balanceOf(s.funding.address) == shares - burned
 
@@ -102,10 +99,9 @@ def test_insufficient_shares_revert_even_with_loose_usdc(system):
     assert s.usdc.balanceOf(s.payee) == 0
     assert s.usdc.balanceOf(s.funding.address) == 1000 * 10**6
     assert s.vault.balanceOf(s.funding.address) == shares
-    assert s.funding.paid(s.start) == 0
 
 
-def test_draw_permissions_and_automatic_upcoming_week(system):
+def test_draw_permissions_and_no_programme_dates(system):
     s = system
     with boa.env.prank(s.stranger), boa.reverts("manager"):
         s.funding.draw(1)
@@ -114,14 +110,13 @@ def test_draw_permissions_and_automatic_upcoming_week(system):
             s.funding.draw(0)
         s.funding.draw(1)
         s.funding.draw(2)
-        assert s.funding.paid(s.start) == 3
+        assert s.usdc.balanceOf(s.payee) == 3
         advance(s.start)
         s.funding.draw(4)
-        assert s.funding.get_logs()[-1].week == s.start + WEEK
-        assert s.funding.paid(s.start + WEEK) == 4
-        advance(s.funding.END() - WEEK)
-        with boa.reverts("week"):
-            s.funding.draw(1)
+        assert s.funding.get_logs()[-1].usdc == 4
+        advance(s.escrow.END())
+        s.funding.draw(8)
+    assert s.usdc.balanceOf(s.payee) == 15
 
 
 def test_funding_recipient_defaults_to_fee_burner_and_can_change(system):
@@ -139,7 +134,41 @@ def test_funding_recipient_defaults_to_fee_burner_and_can_change(system):
         assert s.funding.get_logs()[-1].recipient == s.stranger
     assert s.usdc.balanceOf(s.payee) == 10 * 10**6
     assert s.usdc.balanceOf(s.stranger) == 20 * 10**6
-    assert s.funding.paid(s.start) == 30 * 10**6
+
+
+def test_proceeds_validates_its_own_programme_dates(system):
+    s = system
+    for start, weeks, error in [
+        (boa.env.evm.patch.timestamp, 8, "start"),
+        (s.start + 1, 8, "start"),
+        (s.start, 0, "duration"),
+        (s.start, 53, "duration"),
+    ]:
+        with boa.reverts(error):
+            boa.load(str(ROOT / "contracts/ProceedsEscrow.vy"), start, weeks)
+    assert s.escrow.START() == s.start
+    assert s.escrow.END() == s.start + 8 * WEEK
+
+
+def test_proceeds_continues_after_funding_is_recovered(system):
+    s = system
+    with boa.env.prank(s.manager):
+        s.funding.draw(2000 * 10**6)
+    begin(s)
+    _, output = sale(s)
+    assert s.usdc.balanceOf(s.escrow.address) == output // 4
+    with boa.env.prank(s.funding.GOVERNANCE()):
+        s.funding.recover(s.vault.address, s.vault.balanceOf(s.funding.address))
+    s.vault.configure(UNIT, True)
+    assert s.funding.assets() == 0
+    # The second week still earns its own share, without another draw.
+    week = s.start + WEEK
+    s.gauge.set_weight(week, 2 * (s.start + 52 * WEEK - week) * 10**12, 10**16)
+    advance(week + 3600)
+    before = s.usdc.balanceOf(s.escrow.address)
+    _, output = sale(s)
+    assert s.escrow.weeks(week).share == UNIT // 2
+    assert s.usdc.balanceOf(s.escrow.address) - before == output // 2
 
 
 def test_full_claim_autocaptures_and_preserves_existing_balances(system):
@@ -171,7 +200,6 @@ def test_full_claim_autocaptures_and_preserves_existing_balances(system):
 def test_public_checkpoint_captures_boundary_without_claiming_while_paused(system):
     s = system
     with boa.env.prank(s.manager):
-        s.funding.draw(1)
         s.escrow.set_paused(True)
     advance(s.start)
     with boa.env.prank(s.stranger):
@@ -187,8 +215,6 @@ def test_public_checkpoint_captures_boundary_without_claiming_while_paused(syste
 def test_boundary_tail_uses_new_week_share(system):
     s = system
     begin(s)
-    with boa.env.prank(s.manager):
-        s.funding.draw(1000 * 10**6)
     sale(s)
     s.gauge.set_vote(s.voter, 2 * 10**12, s.start + 52 * WEEK, s.start + 3600)
     advance(s.start + WEEK - 180)
@@ -208,8 +234,8 @@ def test_boundary_tail_uses_new_week_share(system):
     assert sold.week == s.start + WEEK and sold.crv == amount
 
 
-@pytest.mark.parametrize("when", ["before", "unfunded", "after"])
-def test_unfunded_claims_return_everything_to_vyper(system, when):
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_claims_outside_programme_return_everything_to_vyper(system, when):
     s = system
     begin(s)
     retained = s.usdc.balanceOf(s.escrow.address)
@@ -217,7 +243,7 @@ def test_unfunded_claims_return_everything_to_vyper(system, when):
         # begin() already settled a real pre-programme claim.
         assert retained == 0 and s.usdc.balanceOf(s.receiver) > 0
         return
-    advance(s.start + WEEK + 100 if when == "unfunded" else s.funding.END() + 100)
+    advance(s.escrow.END())
     before = s.usdc.balanceOf(s.receiver)
     _, output = sale(s)
     assert s.usdc.balanceOf(s.receiver) - before == output
@@ -317,14 +343,13 @@ def test_governance_claws_back_funding_without_sale_or_vault_dependencies(system
     if when != "before":
         begin(s)
         if when == "after":
-            advance(s.funding.END())
+            advance(s.escrow.END())
     with boa.env.prank(s.manager):
         s.escrow.set_paused(True)
     s.vault.configure(
         UNIT, True
     )  # Redemption can be unavailable; shares remain recoverable.
     shares = s.vault.balanceOf(s.funding.address)
-    paid = s.funding.paid(s.start)
     s.usdc.mint(s.funding.address, 123)
     for caller in [s.keeper, s.stranger, s.escrow.address]:
         with boa.env.prank(caller), boa.reverts("management"):
@@ -337,7 +362,6 @@ def test_governance_claws_back_funding_without_sale_or_vault_dependencies(system
         s.vault.balanceOf(s.funding.address) == s.usdc.balanceOf(s.funding.address) == 0
     )
     assert s.usdc.balanceOf(governance) == 123
-    assert s.funding.paid(s.start) == paid
 
 
 @pytest.mark.parametrize("share", [0, 1, 3, 4])
@@ -454,8 +478,6 @@ def test_sale_cooldown_and_manager_floor(system):
 def test_delayed_sale_checks_week_and_scales_floor_for_grown_claim(system):
     s = system
     begin(s)
-    with boa.env.prank(s.manager):
-        s.funding.draw(1000 * 10**6)
     amount, output = preview(s)
     minted = s.minter.minted(s.receiver, s.gauge.address)
     advance(s.start + 7200)

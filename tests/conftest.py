@@ -55,7 +55,7 @@ def system():
         mocks.values()
     )
     start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK
-    funding = boa.load(str(ROOT / "contracts/FundingEscrow.vy"), start, 8)
+    funding = boa.load(str(ROOT / "contracts/FundingEscrow.vy"))
     payee = funding.recipient()
     usdc.mint(manager, 100_000 * 10**6)
     with boa.env.prank(manager):
@@ -72,7 +72,8 @@ def system():
 def deploy_proceeds(s):
     s.escrow = boa.load(
         str(ROOT / "contracts/ProceedsEscrow.vy"),
-        s.funding.address,
+        s.start,
+        8,
     )
     with boa.env.prank(s.manager):
         s.escrow.set_keeper(s.keeper, True)

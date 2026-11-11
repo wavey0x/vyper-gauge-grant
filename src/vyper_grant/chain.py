@@ -5,23 +5,17 @@ from .core import ADDRESSES, WEEK, artifact, contract, named
 
 
 def verify(client, c, block="latest", names=("funding", "proceeds")):
-    if any(c.get(k) is None for k in {*names, "funding", "start", "weeks"}):
-        raise ValueError(
-            "Configure the required contracts, start and weeks first"
-        )
+    required = set(names) | ({"start", "weeks"} if "proceeds" in names else set())
+    if any(c.get(k) is None for k in required):
+        raise ValueError("Missing configuration: " + ", ".join(sorted(required)))
     contracts = {n: contract(client, n, c.get(n)) for n in names}
-    expected = {
-        "funding": {
-            "START": c["start"],
-            "END": c["start"] + c["weeks"] * WEEK,
-        },
-        "proceeds": {
-            "FUNDING": c["funding"],
+    expected = {"funding": {}}
+    if "proceeds" in names:
+        expected["proceeds"] = {
             "START": c["start"],
             "END": c["start"] + c["weeks"] * WEEK,
             "RECEIVER": ADDRESSES["receiver"],
-        },
-    }
+        }
     for name, instance in contracts.items():
         code = bytes(client.eth.get_code(instance.address, block_identifier=block))
         runtime = bytes.fromhex(artifact(name)["bytecode_runtime"][2:])
@@ -82,21 +76,25 @@ def report(client, c):
 
     def events(event):
         return logs(client, event, c["deployment_block"], block)
-    rows = {}
-    for event in events(funding.events.Drawn()):
-        a = event["args"]
-        row = rows.setdefault(
-            a["week"], dict(week=a["week"], paid=0, sold=0, output=0, yearn=0, payments=[])
+    payments = [
+        dict(
+            usdc=e["args"]["usdc"],
+            recipient=e["args"]["recipient"],
+            timestamp=client.eth.get_block(e["blockNumber"])["timestamp"],
+            tx=Web3.to_hex(e["transactionHash"]),
         )
-        row["paid"] += a["usdc"]
-        row["payments"].append(dict(
-            usdc=a["usdc"], recipient=a["recipient"], tx=Web3.to_hex(event["transactionHash"])
-        ))
+        for e in events(funding.events.Drawn())
+    ]
+    start, end = read(proceeds.functions.START()), read(proceeds.functions.END())
+    rows = {
+        week: dict(week=week, sold=0, output=0, yearn=0)
+        for week in range(start, min(end, final["timestamp"] + 1), WEEK)
+    }
     forwarded = 0
     for event in events(proceeds.events.Sold()):
         a = event["args"]
         rows.setdefault(
-            a["week"], dict(week=a["week"], paid=0, sold=0, output=0, yearn=0)
+            a["week"], dict(week=a["week"], sold=0, output=0, yearn=0)
         )
         if a["yearn_receiver"] != proceeds.address:
             forwarded += a["yearn"]
@@ -111,21 +109,20 @@ def report(client, c):
     warnings = []
     for week, row in rows.items():
         row.update(named(proceeds.functions.weeks(week), block))
+        row["active"] = start <= week < end
         current = week <= final["timestamp"] < week + WEEK
-        missing = current and row["paid"] > 0 and not row["ready"]
+        missing = current and row["active"] and not row["ready"]
         row["status"] = (
-            "Scheduled"
-            if week > final["timestamp"]
-            else "Needs checkpoint"
+            "Needs checkpoint"
             if missing
             else "Active"
-            if current and row["paid"]
+            if current and row["active"]
             else "Vyper only"
             if current
             else "Closed"
         )
         if missing:
-            warnings.append("The current funded week needs a vote snapshot")
+            warnings.append("The current programme week needs a vote snapshot")
     if read(proceeds.functions.paused()):
         warnings.append("Sales are paused; public checkpoint remains available")
     data = dict(
@@ -135,9 +132,12 @@ def report(client, c):
         funding=funding.address,
         funding_recipient=read(funding.functions.recipient()),
         proceeds=proceeds.address,
+        start=start,
+        end=end,
         yearn_receiver=read(proceeds.functions.yearn_receiver()),
         forwarded_usdc=forwarded,
-        spent=sum(r["paid"] for r in rows.values()),
+        payments=payments,
+        spent=sum(p["usdc"] for p in payments),
         funding_assets=read(funding.functions.assets()),
         proceeds_balance=read(
             contract(client, "token", ADDRESSES["usdc"]).functions.balanceOf(

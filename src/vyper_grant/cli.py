@@ -39,13 +39,11 @@ def batch(sender, *calls, **meta):
 
 
 def deployment(client, c, name, deployer):
-    if not c.get("start"):
-        raise ValueError("Configure start before deployment")
-    args = [c["start"], c["weeks"]]
+    args = []
     if name == "proceeds":
-        if not c.get("funding"):
-            raise ValueError("Deploy and configure funding first")
-        args = [c["funding"]]
+        if not c.get("start"):
+            raise ValueError("Configure start before deploying proceeds")
+        args = [c["start"], c["weeks"]]
     compiled = artifact(name)
     factory = client.eth.contract(abi=compiled["abi"], bytecode=compiled["bytecode"])
     tx = factory.constructor(*args).build_transaction(
@@ -59,7 +57,7 @@ def deployment(client, c, name, deployer):
 
 
 def setup(client, c, allowance):
-    _, escrow = verify(client, c)
+    (escrow,) = verify(client, c, names=("proceeds",))
     m = contract(client, "minter").functions
     calls = [
         contract(client, "token", A["crv"]).functions.approve(escrow.address, allowance)
@@ -87,11 +85,15 @@ def doctor(client, c):
         raise ValueError("Unexpected vault asset")
     if contract(client, "gauge").functions.receiver().call() != A["receiver"]:
         raise ValueError("Unexpected gauge receiver")
-    if not missing:
-        f, p = verify(client, c)
+    if c.get("funding"):
+        (f,) = verify(client, c, names=("funding",))
         result.update(
             funding_assets=str(f.functions.assets().call()),
             funding_recipient=f.functions.recipient().call(),
+        )
+    if all(c.get(k) is not None for k in ["proceeds", "start", "weeks", "keeper"]):
+        (p,) = verify(client, c, names=("proceeds",))
+        result.update(
             paused=p.functions.paused().call(),
             cooldown=p.functions.cooldown().call(),
             can_work=p.functions.canWork().call(),
@@ -205,7 +207,7 @@ def main():
             if funding_only:
                 (funding,) = verify(client, c, names=("funding",))
             else:
-                funding, escrow = verify(client, c)
+                (escrow,) = verify(client, c, names=("proceeds",))
                 ef = escrow.functions
             meta = {}
             sender = A["manager"]

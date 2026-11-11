@@ -15,7 +15,6 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
         nonce = client.eth.get_transaction_count(sender)
         if nonce != client.eth.get_transaction_count(sender, "pending"):
             return {"status": "pending nonce"}
-        funding = contract(client, "funding", c["funding"])
         escrow = contract(client, "proceeds", c["proceeds"])
         f = escrow.functions
         head = client.eth.get_block("latest")
@@ -24,8 +23,8 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
             return fn.call(block_identifier=block)
         week = now // WEEK * WEEK
         current = named(f.weeks(week), block)
-        snapshot_due = read(funding.functions.paid(week)) > 0 and not current["ready"]
-        end = read(f.END())
+        start, end = read(f.START()), read(f.END())
+        snapshot_due = start <= week < end and not current["ready"]
         closing = now % WEEK >= WEEK - 300 or end <= now < end + read(f.cooldown()) + 300
         paused = read(f.paused())
         can_work = read(f.canWork())

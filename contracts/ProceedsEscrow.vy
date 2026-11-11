@@ -8,11 +8,6 @@ interface Token:
     def transfer(to: address, amount: uint256) -> bool: nonpayable
     def transferFrom(owner: address, to: address, amount: uint256) -> bool: nonpayable
 
-interface Funding:
-    def START() -> uint256: view
-    def END() -> uint256: view
-    def paid(week: uint256) -> uint256: view
-
 interface Controller:
     def checkpoint_gauge(gauge: address): nonpayable
     def points_weight(gauge: address, week: uint256) -> (uint256, uint256): view
@@ -75,7 +70,6 @@ MINTER: public(constant(address)) = 0xd061D61a4d941c39E5453435B6345Dc261C2fcE0
 VOTER: public(constant(address)) = 0xF147b8125d2ef93FB6965Db97D6746952a133934
 POOL: public(constant(address)) = 0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14
 STABLE_POOL: public(constant(address)) = 0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E
-FUNDING: public(immutable(address))
 START: public(immutable(uint256))
 END: public(immutable(uint256))
 RECEIVER: public(immutable(address))
@@ -88,11 +82,11 @@ last_sale: public(uint256)
 yearn_receiver: public(address)
 
 @deploy
-def __init__(funding: address):
-    FUNDING = funding
-    START = staticcall Funding(funding).START()
-    END = staticcall Funding(funding).END()
-    assert block.timestamp < START, "start"
+def __init__(start: uint256, weeks: uint256):
+    assert start > block.timestamp and start % WEEK == 0, "start"
+    assert weeks > 0 and weeks <= 52, "duration"
+    START = start
+    END = start + weeks * WEEK
     RECEIVER = staticcall Gauge(GAUGE).receiver()
     assert RECEIVER != empty(address), "receiver"
     self.yearn_receiver = self
@@ -103,7 +97,6 @@ def __init__(funding: address):
 @internal
 def _snapshot(week: uint256, yearn: uint256, manual: bool):
     assert week >= START and week < END and week % WEEK == 0 and week <= block.timestamp, "week"
-    assert staticcall Funding(FUNDING).paid(week) > 0, "unfunded"
     assert not self.weeks[week].ready, "already captured"
     total: uint256 = (staticcall Controller(CONTROLLER).points_weight(GAUGE, week))[0]
     assert yearn <= total, "weight"
@@ -112,7 +105,7 @@ def _snapshot(week: uint256, yearn: uint256, manual: bool):
 
 @internal
 def _checkpoint(week: uint256) -> uint256:
-    if week < START or week >= END or staticcall Funding(FUNDING).paid(week) == 0:
+    if week < START or week >= END:
         return 0
     if not self.weeks[week].ready:
         extcall Controller(CONTROLLER).checkpoint_gauge(GAUGE)

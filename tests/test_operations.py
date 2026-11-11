@@ -88,8 +88,8 @@ def chain(monkeypatch):
         keeper=keeper,
         deployment_block=1,
     )
-    funding = deploy("funding")
     escrow = deploy("proceeds")
+    funding = deploy("funding")
     usdc.functions.mint(manager, 100_000 * 10**6).transact()
     usdc.functions.approve(vault.address, 100_000 * 10**6).transact({"from": manager})
     vault.functions.deposit(100_000 * 10**6, funding.address).transact(
@@ -128,9 +128,13 @@ def submit(s, result):
 def test_verified_contracts_and_idempotent_setup(chain):
     s = chain
     verify(s["client"], s["c"])
-    vyper, manager = setup(s["client"], s["c"], 10**25)
+    verify(s["client"], {"funding": s["funding"].address}, names=("funding",))
+    prepared = deployment(s["client"], {}, "funding", s["deployer"])
+    assert prepared["constructor_arguments"] == []
+    vyper, manager = setup(s["client"], {**s["c"], "funding": None}, 10**25)
     assert len(vyper["transactions"]) == len(manager["transactions"]) == 1
     assert doctor(s["client"], s["c"])["mint_enabled"]
+    assert doctor(s["client"], {**s["c"], "funding": None})["mint_enabled"]
     with pytest.raises(ValueError, match="START"):
         verify(s["client"], {**s["c"], "start": s["start"] + WEEK})
     with pytest.raises(ValueError, match="bytecode"):
@@ -192,7 +196,7 @@ def test_cli_prepares_receiver_change_and_governance_clawback(
 ):
     s = chain
     config = tmp_path / "config.json"
-    config.write_text(json.dumps(s["c"]))
+    config.write_text(json.dumps({**s["c"], "funding": None}))
     monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
 
     def prepare(*args):
@@ -224,7 +228,7 @@ def test_cli_prepares_receiver_change_and_governance_clawback(
     with pytest.raises(SystemExit):
         prepare("set-cooldown", "--seconds", "599")
     # Governance clawback must work without a deployed or configured seller.
-    config.write_text(json.dumps({**s["c"], "proceeds": None}))
+    config.write_text(json.dumps({**s["c"], "proceeds": None, "start": None}))
     shares = s["vault"].functions.balanceOf(s["funding"].address).call()
     recovery = prepare(
         "recover",
@@ -249,7 +253,7 @@ def test_checkpoint_retries_while_paused_and_explicit_command_is_public(
     chain, tmp_path
 ):
     s = chain
-    s["funding"].functions.draw(1).transact({"from": s["manager"]})
+    s["c"]["funding"] = None
     s["escrow"].functions.set_paused(True).transact({"from": s["manager"]})
     s["tester"].time_travel(s["start"] + 1)
     s["tester"].mine_block()
@@ -270,7 +274,7 @@ def test_checkpoint_retries_while_paused_and_explicit_command_is_public(
 def test_draw_cli_and_report_record_each_recipient(chain, tmp_path, monkeypatch):
     s = chain
     config = tmp_path / "config.json"
-    config.write_text(json.dumps({**s["c"], "proceeds": None}))
+    config.write_text(json.dumps({**s["c"], "proceeds": None, "start": None}))
     monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
 
     def execute(*args):
@@ -292,9 +296,13 @@ def test_draw_cli_and_report_record_each_recipient(chain, tmp_path, monkeypatch)
     assert s["usdc"].functions.balanceOf(burner).call() == 10 * 10**6
     assert s["usdc"].functions.balanceOf(s["payee"]).call() == 20 * 10**6
     data = report(s["client"], s["c"])
-    assert data["spent"] == data["weeks"][0]["paid"] == str(30 * 10**6)
-    assert data["weeks"][0]["week"] == str(s["start"])
-    assert [p["recipient"] for p in data["weeks"][0]["payments"]] == [burner, s["payee"]]
+    assert data["spent"] == str(30 * 10**6)
+    assert data["weeks"] == []  # Payments do not create or activate programme weeks.
+    assert [p["recipient"] for p in data["payments"]] == [burner, s["payee"]]
+    for payment in data["payments"]:
+        receipt = s["client"].eth.get_transaction_receipt(payment["tx"])
+        assert int(payment["timestamp"]) == s["client"].eth.get_block(receipt.blockNumber).timestamp
+        assert "week" not in payment
     assert data["funding_recipient"] == s["payee"]
 
 
@@ -340,17 +348,22 @@ def test_closing_sale_bypasses_minimum_and_sells_whole_claim(chain, tmp_path):
     )
 
 
-def test_unfunded_sales_are_reported_with_zero_yearn_share(chain, tmp_path):
+def test_keeper_and_weekly_reporting_work_without_payments(chain, tmp_path):
     s = chain
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
-    result = run(s["client"], s["c"], directory=tmp_path)
+    before = report(s["client"], s["c"])
+    assert before["weeks"][0]["status"] == "Needs checkpoint"
+    assert before["warnings"] == ["The current programme week needs a vote snapshot"]
+    result = run(s["client"], {**s["c"], "funding": None}, directory=tmp_path)
     assert result["status"] == "sale"
     submit(s, result)
     data = report(s["client"], s["c"])
-    assert data["spent"] == data["totals"]["yearn"] == "0"
+    assert data["spent"] == "0" and data["payments"] == []
+    assert int(data["totals"]["yearn"]) > 0
     assert int(data["totals"]["sold"]) > 0
-    assert data["weeks"][0]["status"] == "Vyper only"
+    assert data["weeks"][0]["status"] == "Active"
+    assert "paid" not in data["weeks"][0]
     assert "earned" not in data["totals"] and "remaining" not in data["weeks"][0]
 
 
