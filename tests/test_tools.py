@@ -37,6 +37,10 @@ def test_config_and_decimal_validation(tmp_path):
     p.write_text(json.dumps(c))
     with pytest.raises(ValueError, match="Maximum CRV"):
         load_config(p)
+    c.update(max_crv="15000", sell_vyper="false")
+    p.write_text(json.dumps(c))
+    with pytest.raises(ValueError, match="sell_vyper"):
+        load_config(p)
     assert units("0.000001", 6) == 1
     assert units("100000.000000000000000001") == 100000 * 10**18 + 1
     for n in ["-1", "NaN", "Infinity", "0.0000001"]:

@@ -55,6 +55,7 @@ def load_config(path):
         "keeper",
         "min_trade_crv",
         "max_crv",
+        "sell_vyper",
         "slippage_bps",
         "max_gas_gwei",
     }
@@ -78,6 +79,8 @@ def load_config(path):
         raise ValueError("Minimum trade must be positive")
     if units(c.get("max_crv", "15000")) < units(c["min_trade_crv"]):
         raise ValueError("Maximum CRV must be at least the minimum trade")
+    if type(c.get("sell_vyper", True)) is not bool:
+        raise ValueError("sell_vyper must be a boolean")
     return c
 
 

@@ -13,6 +13,7 @@ def test_privileged_entry_points_enforce_roles(system, role):
     assert s.escrow.GOVERNANCE() == governance
     caller = governance if role == "governance" else getattr(s, role)
     s.crvusd.mint(s.escrow.address, 123)
+    s.crv.mint(s.escrow.address, 123)
     with boa.env.anchor():
         amount = s.escrow.claimable()
         minimum = s.escrow.quote(amount) * 99 // 100
@@ -28,7 +29,8 @@ def test_privileged_entry_points_enforce_roles(system, role):
         (s.escrow.set_cooldown, (900,), manager, "manager"),
         (s.escrow.set_paused, (True,), manager, "manager"),
         (s.escrow.withdraw, (s.crvusd.address, 123, s.stranger), management, "management"),
-        (s.escrow.work, (minimum, amount), {"keeper"}, "keeper or paused"),
+        (s.escrow.withdraw, (s.crv.address, 123, s.stranger), {"receiver"}, "vyper"),
+        (s.escrow.work, (minimum, amount, True), {"keeper"}, "keeper or paused"),
     ]
     for fn, args, allowed, error in actions:
         with boa.env.anchor(), boa.env.prank(caller):

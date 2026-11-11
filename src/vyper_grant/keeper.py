@@ -6,6 +6,21 @@ from pathlib import Path
 from .core import WEEK, address, contract, named, units
 
 
+def quote_work(escrow, c, block):
+    """Quote only this batch's swap; simulate the share checkpoint when retaining CRV."""
+    f = escrow.functions
+    amount = min(f.claimable().call(block_identifier=block), units(c.get("max_crv", "15000")))
+    sell_vyper = c.get("sell_vyper", True)
+    swap = amount if sell_vyper else amount * f.checkpoint().call(block_identifier=block) // 10**18
+    return {
+        "crv": amount,
+        "swap_crv": swap,
+        "vyper_crv": amount - swap,
+        "crvusd": f.quote(swap).call(block_identifier=block),
+        "sell_vyper": sell_vyper,
+    }
+
+
 def run(client, c, send=False, directory="output/keeper", checkpoint_only=False):
     root = Path(directory)
     root.mkdir(parents=True, exist_ok=True)
@@ -31,15 +46,17 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False)
         fn = f.checkpoint()
         action = {"status": "checkpoint"}
         if not checkpoint_only and can_work and authorized:
-            # Simulate the gauge checkpoint, then quote that amount at the same block.
-            amount = min(read(f.claimable()), units(c.get("max_crv", "15000")))
-            output = read(f.quote(amount))
+            quote = quote_work(escrow, c, block)
+            amount, output = quote["crv"], quote["crvusd"]
             minimum = output * (10000 - c["slippage_bps"]) // 10000
-            if minimum > 0 and (closing or amount >= units(c["min_trade_crv"])):
-                fn = f.work(minimum, amount)
+            if amount > 0 and (quote["swap_crv"] == 0 or minimum > 0) and (closing or amount >= units(c["min_trade_crv"])):
+                fn = f.work(minimum, amount, quote["sell_vyper"])
                 action = {
-                    "status": "sale",
+                    "status": "sale" if quote["swap_crv"] else "retain",
                     "crv": str(amount),
+                    "swap_crv": str(quote["swap_crv"]),
+                    "vyper_crv": str(quote["vyper_crv"]),
+                    "sell_vyper": quote["sell_vyper"],
                     "max_crv": str(amount),
                     "week": week,
                     "min_crvusd": str(minimum),

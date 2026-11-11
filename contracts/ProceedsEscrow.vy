@@ -36,6 +36,7 @@ event Sold:
     crvusd: uint256
     yearn: uint256
     yearn_receiver: address
+    vyper_crv: uint256
 event YearnReceiverSet:
     receiver: address
 event KeeperSet:
@@ -134,7 +135,7 @@ def canWork() -> bool:
 
 @external
 @nonreentrant
-def work(min_out: uint256, max_crv: uint256):
+def work(min_out: uint256, max_crv: uint256, sell_vyper: bool):
     assert self.keepers[msg.sender] and not self.paused, "keeper or paused"
     assert block.timestamp - self.last_sale >= self.cooldown, "cooldown"
     week: uint256 = block.timestamp // WEEK * WEEK
@@ -143,15 +144,20 @@ def work(min_out: uint256, max_crv: uint256):
     amount: uint256 = min(staticcall IERC20(CRV).balanceOf(RECEIVER), max_crv)
     assert amount > 0, "nothing to sell"
     assert extcall IERC20(CRV).transferFrom(RECEIVER, self, amount), "pull"
-    output: uint256 = extcall Pool(POOL).exchange(2, 0, amount, min_out)
-    yearn: uint256 = output * share // SCALE
+    swap_amount: uint256 = amount if sell_vyper else amount * share // SCALE
+    output: uint256 = 0
+    if swap_amount > 0:
+        output = extcall Pool(POOL).exchange(2, 0, swap_amount, min_out)
+    else:
+        assert min_out == 0, "min out"
+    yearn: uint256 = output * share // SCALE if sell_vyper else output
     receiver: address = self.yearn_receiver
     if yearn > 0 and receiver != self:
         assert extcall IERC20(CRVUSD).transfer(receiver, yearn), "forward"
     if output > yearn:
         assert extcall IERC20(CRVUSD).transfer(RECEIVER, output - yearn), "return"
     self.last_sale = block.timestamp
-    log Sold(week=week, crv=amount, crvusd=output, yearn=yearn, yearn_receiver=receiver)
+    log Sold(week=week, crv=swap_amount, crvusd=output, yearn=yearn, yearn_receiver=receiver, vyper_crv=amount - swap_amount)
 
 @external
 def set_yearn_receiver(receiver: address):
@@ -181,7 +187,10 @@ def set_paused(paused: bool):
 @external
 @nonreentrant
 def withdraw(token: address, amount: uint256, recipient: address):
-    assert msg.sender == MANAGER or msg.sender == GOVERNANCE, "management"
+    if token == CRV:
+        assert msg.sender == RECEIVER, "vyper"
+    else:
+        assert msg.sender == MANAGER or msg.sender == GOVERNANCE, "management"
     assert recipient != empty(address) and recipient != self, "recipient"
     assert extcall IERC20(token).transfer(recipient, amount, default_return_value=True), "transfer"
     log Withdrawn(token=token, amount=amount, recipient=recipient)

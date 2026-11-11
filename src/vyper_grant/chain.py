@@ -85,14 +85,14 @@ def report(client, c):
     ]
     start = read(proceeds.functions.DEPLOYED_WEEK())
     rows = {
-        week: dict(week=week, sold=0, output=0, yearn=0)
+        week: dict(week=week, sold=0, output=0, yearn=0, vyper_crv=0)
         for week in range(start, final["timestamp"] + 1, WEEK)
     }
     forwarded = 0
     for event in events(proceeds.events.Sold()):
         a = event["args"]
         rows.setdefault(
-            a["week"], dict(week=a["week"], sold=0, output=0, yearn=0)
+            a["week"], dict(week=a["week"], sold=0, output=0, yearn=0, vyper_crv=0)
         )
         if a["yearn_receiver"] != proceeds.address:
             forwarded += a["yearn"]
@@ -102,6 +102,7 @@ def report(client, c):
             ("sold", "crv"),
             ("output", "crvusd"),
             ("yearn", "yearn"),
+            ("vyper_crv", "vyper_crv"),
         ]:
             rows[a["week"]][key] += a[field]
     warnings = []
@@ -121,6 +122,7 @@ def report(client, c):
             warnings.append("The current week needs a vote snapshot")
     if read(proceeds.functions.paused()):
         warnings.append("Sales are paused; public checkpoint remains available")
+    withdrawals = events(proceeds.events.Withdrawn())
     data = dict(
         as_of=final["timestamp"],
         block=block,
@@ -139,14 +141,22 @@ def report(client, c):
                 proceeds.address
             )
         ),
+        vyper_crv_balance=read(
+            contract(client, "token", ADDRESSES["crv"]).functions.balanceOf(proceeds.address)
+        ),
         totals={
-            k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "yearn"]
+            k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "yearn", "vyper_crv"]
         },
         weeks=sorted(rows.values(), key=lambda r: r["week"]),
         withdrawn_crvusd=sum(
             e["args"]["amount"]
-            for e in events(proceeds.events.Withdrawn())
+            for e in withdrawals
             if e["args"]["token"] == ADDRESSES["crvusd"]
+        ),
+        withdrawn_crv=sum(
+            e["args"]["amount"]
+            for e in withdrawals
+            if e["args"]["token"] == ADDRESSES["crv"]
         ),
         warnings=list(dict.fromkeys(warnings)),
     )

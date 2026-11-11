@@ -16,7 +16,7 @@ from .core import (
     rpc,
     units,
 )
-from .chain import historical_vote, report, verify
+from .chain import historical_vote, report, serialize, verify
 from .report import render
 
 
@@ -209,20 +209,10 @@ def main():
             meta = {}
             sender = A["manager"]
             if args.command == "quote":
+                from .keeper import quote_work
+
                 block = client.eth.block_number
-                amount = min(
-                    ef.claimable().call(block_identifier=block),
-                    units(c.get("max_crv", "15000")),
-                )
-                output = ef.quote(amount).call(block_identifier=block)
-                print(
-                    json.dumps(
-                        {
-                            "crv": str(amount),
-                            "crvusd": str(output),
-                        }
-                    )
-                )
+                print(json.dumps(serialize(quote_work(escrow, c, block))))
                 return
             if args.command == "draw":
                 fn = funding.functions.draw(units(args.usdc, 6))
@@ -242,7 +232,11 @@ def main():
                     sender = A["governance"]
                 fn = funding.functions.recover(address(args.token), args.amount_raw)
             elif args.command == "withdraw":
-                if args.governance:
+                if address(args.token) == A["crv"]:
+                    if args.governance:
+                        raise ValueError("Only the Vyper multisig can withdraw CRV")
+                    sender = A["receiver"]
+                elif args.governance:
                     sender = A["governance"]
                 fn = ef.withdraw(
                     address(args.token), args.amount_raw, address(args.recipient)

@@ -101,13 +101,15 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             assert vault.balanceOf(A["governance"]) == before + shares
             assert vault.balanceOf(funding.address) == 0
 
-        def sell(limit=None):
+        def sell(limit=None, sell_vyper=True):
             with boa.env.anchor():
                 amount = escrow.claimable()
                 if limit is not None:
                     amount = min(amount, limit)
-                output = escrow.quote(amount)
+                swapped = amount if sell_vyper else amount * escrow.checkpoint() // 10**18
+                output = escrow.quote(swapped)
             before_crv = crv.balanceOf(A["receiver"])
+            before_retained = crv.balanceOf(escrow.address)
             before_minted = minter.minted(A["receiver"], A["gauge"])
             before_usd = crvusd.balanceOf(A["receiver"])
             before_held = crvusd.balanceOf(escrow.address)
@@ -116,14 +118,15 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             with boa.env.prank(keeper):
                 escrow.work(
                     output * 995 // 1000,
-                    amount,
+                    amount, sell_vyper,
                 )
             event = escrow.get_logs(include_child_logs=False)[-1]
-            assert event.crv == amount and event.crvusd == output
+            assert event.crv == swapped and event.crvusd == output
+            assert event.vyper_crv == amount - swapped
             assert crv.balanceOf(A["receiver"]) == (
                 before_crv + minter.minted(A["receiver"], A["gauge"]) - before_minted - amount
             )
-            assert crv.balanceOf(escrow.address) == 0
+            assert crv.balanceOf(escrow.address) == before_retained + event.vyper_crv
             assert gauge.integrate_fraction(A["receiver"]) == minter.minted(
                 A["receiver"], A["gauge"]
             )
@@ -134,6 +137,15 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             )
             assert crvusd.balanceOf(A["receiver"]) - before_usd == output - event.yearn
             return event
+
+        # Retention also works before Yearn's vote is effective, without a swap.
+        with boa.env.anchor():
+            retained = sell(100 * 10**18, False)
+            assert retained.crv == retained.crvusd == retained.yearn == 0
+            assert retained.vyper_crv == 100 * 10**18
+            boa.env.time_travel(seconds=600)
+            sell(100 * 10**18)
+            assert crv.balanceOf(escrow.address) == retained.vyper_crv
 
         # Capped pulls leave real, already-minted CRV available for the next sale.
         with boa.env.anchor():
@@ -156,6 +168,25 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         assert first.week == start and first.yearn == first.crvusd * share // 10**18
         with boa.env.anchor():
             assert escrow.claimable() == 0
+
+        with boa.env.anchor():
+            boa.env.time_travel(seconds=3600)
+            retained = sell(sell_vyper=False)
+            held_crv = crv.balanceOf(escrow.address)
+            assert held_crv == retained.vyper_crv > 0
+            assert retained.crvusd == retained.yearn > 0
+            boa.env.time_travel(seconds=600)
+            sell()
+            assert crv.balanceOf(escrow.address) == held_crv
+            for account in [A["manager"], A["governance"], keeper]:
+                with boa.env.prank(account), boa.reverts("vyper"):
+                    escrow.withdraw(A["crv"], held_crv, payee)
+            with boa.env.prank(A["manager"]):
+                escrow.set_paused(True)
+            with boa.env.prank(A["receiver"]):
+                escrow.withdraw(A["crv"], held_crv, payee)
+            assert crv.balanceOf(payee) == held_crv
+            assert crv.balanceOf(escrow.address) == 0
 
         with boa.env.prank(A["manager"]):
             escrow.set_yearn_receiver(payee)

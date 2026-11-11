@@ -111,7 +111,7 @@ def begin(s):
     s["tester"].time_travel(s["start"] - 180)
     quoted = s["escrow"].functions.claimable().call()
     s["escrow"].functions.work(
-        0, quoted
+        0, quoted, True
     ).transact({"from": s["keeper"]})
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
@@ -145,7 +145,8 @@ def test_keeper_prepares_one_sale_and_report_tracks_withdrawals(chain, tmp_path)
     assert result["status"] == "sale" and result["dry_run"]
     function, arguments = s["escrow"].decode_function_input(result["data"])
     assert function.fn_name == "work"
-    assert set(arguments) == {"min_out", "max_crv"}
+    assert set(arguments) == {"min_out", "max_crv", "sell_vyper"}
+    assert arguments["sell_vyper"] is True
     assert arguments["max_crv"] == int(result["max_crv"])
     assert arguments["max_crv"] == int(result["crv"])
     assert arguments["min_out"] == int(result["min_crvusd"])
@@ -211,6 +212,53 @@ def test_keeper_quotes_exact_capped_pull_including_receiver_balance(chain, tmp_p
     assert s["crv"].functions.balanceOf(s["receiver"]).call() >= 400 * 10**18
 
 
+def test_keeper_quotes_only_yearns_crv_and_reports_retention(chain, tmp_path, monkeypatch, capsys):
+    s = chain
+    begin(s)
+    s["c"].update(sell_vyper=False, max_crv="100", min_trade_crv="50")
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(s["c"]))
+    monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
+    monkeypatch.setattr("sys.argv", ["vyper-grant", "--config", str(config), "quote"])
+    main()
+    quoted = json.loads(capsys.readouterr().out)
+    result = run(s["client"], s["c"], directory=tmp_path)
+    _, args = s["escrow"].decode_function_input(result["data"])
+    assert args["sell_vyper"] is False
+    assert args["max_crv"] == 100 * 10**18
+    assert quoted["swap_crv"] == result["swap_crv"] == str(25 * 10**18)
+    assert quoted["vyper_crv"] == result["vyper_crv"] == str(75 * 10**18)
+    assert args["min_out"] == int(quoted["crvusd"]) * 995 // 1000
+    assert not s["escrow"].functions.weeks(s["start"]).call()[0]
+    submit(s, result)
+    data = report(s["client"], s["c"])
+    assert data["weeks"][-1]["sold"] == str(25 * 10**18)
+    assert data["weeks"][-1]["yearn"] == data["weeks"][-1]["output"]
+    assert data["totals"]["vyper_crv"] == data["vyper_crv_balance"] == str(75 * 10**18)
+    assert data["withdrawn_crv"] == "0"
+    s["tester"].time_travel(s["client"].eth.get_block("latest").timestamp + 600)
+    s["tester"].mine_block()
+    s["c"]["sell_vyper"] = True
+    submit(s, run(s["client"], s["c"], directory=tmp_path))
+    assert report(s["client"], s["c"])["vyper_crv_balance"] == str(75 * 10**18)
+
+
+def test_keeper_can_retain_entire_batch_with_zero_yearn_share(chain, tmp_path):
+    s = chain
+    s["c"].update(sell_vyper=False, max_crv="100", min_trade_crv="50")
+    s["tester"].time_travel(s["start"] - 180)
+    s["tester"].mine_block()
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "retain"
+    assert result["swap_crv"] == result["min_crvusd"] == "0"
+    assert result["vyper_crv"] == result["crv"] == str(100 * 10**18)
+    submit(s, result)
+    data = report(s["client"], s["c"])
+    assert data["vyper_crv_balance"] == str(100 * 10**18)
+    assert data["totals"]["sold"] == data["totals"]["output"] == "0"
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
+
+
 def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
     chain, tmp_path, monkeypatch
 ):
@@ -263,6 +311,24 @@ def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
         )
     assert s["crvusd"].functions.balanceOf(s["payee"]).call() == 246 * 10**18
     assert s["escrow"].functions.yearn_receiver().call() == s["payee"]
+    s["crv"].functions.mint(s["escrow"].address, 10 * 10**18).transact()
+    withdrawal = prepare(
+        "withdraw", "--token", s["crv"].address,
+        "--amount-raw", str(3 * 10**18), "--recipient", s["payee"],
+    )
+    assert withdrawal["meta"]["safeAddress"] == s["receiver"]
+    s["client"].eth.send_transaction({
+        "from": s["receiver"],
+        **{k: withdrawal["transactions"][0][k] for k in ["to", "data"]},
+    })
+    data = report(s["client"], s["c"])
+    assert data["withdrawn_crv"] == str(3 * 10**18)
+    assert data["vyper_crv_balance"] == str(7 * 10**18)
+    with pytest.raises(SystemExit):
+        prepare(
+            "withdraw", "--token", s["crv"].address,
+            "--amount-raw", "1", "--recipient", s["payee"], "--governance",
+        )
     # Governance clawback must work without a deployed or configured seller.
     config.write_text(json.dumps({**s["c"], "proceeds": None}))
     shares = s["vault"].functions.balanceOf(s["funding"].address).call()
@@ -412,7 +478,7 @@ def test_boundary_checkpoint_during_cooldown_does_not_bypass_next_week_minimum(c
     s["tester"].time_travel(end - 180)
     quoted = s["escrow"].functions.claimable().call()
     s["escrow"].functions.work(
-        0, quoted
+        0, quoted, True
     ).transact({"from": s["keeper"]})
     s["c"]["min_trade_crv"] = "1000000"
     s["tester"].time_travel(end + 60)
