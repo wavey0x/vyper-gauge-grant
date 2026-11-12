@@ -33,7 +33,7 @@ def test_claimable_checkpoints_without_minting_and_quote_only_prices(system):
     minted = s.minter.minted(s.receiver, s.gauge.address)
     balance = s.crv.balanceOf(s.receiver)
     assert s.escrow.quote(0) == 0
-    assert s.escrow.quote(10 * UNIT) == s.pool.get_dy(2, 0, 10 * UNIT) == 25 * UNIT // 10
+    assert s.escrow.quote(10 * UNIT) == s.stable_pool.get_dy(1, 0, s.pool.get_dy(2, 0, 10 * UNIT)) == 2_500_000
     assert s.gauge.last_checkpoint() == last
     amount = s.escrow.claimable()
     assert amount > 0 and s.gauge.last_checkpoint() == boa.env.evm.patch.timestamp
@@ -67,7 +67,7 @@ def test_proceeds_continues_after_funding_is_recovered(system):
     begin(s)
     s.funding.work()
     _, output = sale(s)
-    assert s.crvusd.balanceOf(s.escrow.address) == output // 4
+    assert s.usdc.balanceOf(s.escrow.address) == output // 4
     with boa.env.prank(s.funding.GOVERNANCE()):
         s.funding.recover(s.vault.address, s.vault.balanceOf(s.funding.address))
     s.vault.configure(UNIT, True)
@@ -76,10 +76,10 @@ def test_proceeds_continues_after_funding_is_recovered(system):
     week = s.start + WEEK
     s.gauge.set_weight(week, 2 * (s.start + 52 * WEEK - week) * 10**12, 10**16)
     advance(week + 3600)
-    before = s.crvusd.balanceOf(s.escrow.address)
+    before = s.usdc.balanceOf(s.escrow.address)
     _, output = sale(s)
     assert s.escrow.weeks(week).share == UNIT // 2
-    assert s.crvusd.balanceOf(s.escrow.address) - before == output // 2
+    assert s.usdc.balanceOf(s.escrow.address) - before == output // 2
 
 
 def test_sale_includes_receiver_crv_and_preserves_escrow_balances(system):
@@ -90,7 +90,7 @@ def test_sale_includes_receiver_crv_and_preserves_escrow_balances(system):
     s.usdc.mint(s.escrow.address, 500 * 10**6)
     s.crvusd.mint(s.escrow.address, 7 * UNIT)
     before_minted = s.minter.minted(s.receiver, s.gauge.address)
-    before_returned = s.crvusd.balanceOf(s.receiver)
+    before_returned = s.usdc.balanceOf(s.receiver)
     assert not s.escrow.weeks(s.start).ready
     amount, output = sale(s)
     assert s.escrow.weeks(s.start).share == UNIT // 4
@@ -100,9 +100,9 @@ def test_sale_includes_receiver_crv_and_preserves_escrow_balances(system):
     )
     assert s.crv.balanceOf(s.receiver) == 0
     assert s.crv.balanceOf(s.escrow.address) == 7 * UNIT
-    assert s.usdc.balanceOf(s.escrow.address) == 500 * 10**6
-    assert s.crvusd.balanceOf(s.escrow.address) == 7 * UNIT + output // 4
-    assert s.crvusd.balanceOf(s.receiver) - before_returned == output - output // 4
+    assert s.usdc.balanceOf(s.escrow.address) == 500 * 10**6 + output // 4
+    assert s.crvusd.balanceOf(s.escrow.address) == 7 * UNIT
+    assert s.usdc.balanceOf(s.receiver) - before_returned == output - output // 4
     assert preview(s) == (0, 0)
     with boa.env.prank(s.keeper), boa.reverts("cooldown"):
         s.escrow.work(0, 1, True)
@@ -135,13 +135,13 @@ def test_boundary_tail_uses_new_week_share(system):
     with boa.env.prank(s.stranger):
         assert s.escrow.checkpoint() == UNIT // 2
     advance(s.start + WEEK + 420)
-    before = s.crvusd.balanceOf(s.escrow.address)
+    before = s.usdc.balanceOf(s.escrow.address)
     amount, output = sale(s)
     sold = s.escrow.get_logs()[-1]
     assert amount > 0
     assert s.escrow.weeks(s.start).share == UNIT // 4
     assert s.escrow.weeks(s.start + WEEK).share == UNIT // 2
-    assert s.crvusd.balanceOf(s.escrow.address) - before == output // 2
+    assert s.usdc.balanceOf(s.escrow.address) - before == output // 2
     assert sold.week == s.start + WEEK and sold.crv == amount
 
 
@@ -151,16 +151,16 @@ def test_deployment_week_with_no_effective_yearn_vote_returns_all_to_vyper(syste
     assert s.escrow.weeks(week).ready and s.escrow.weeks(week).share == 0
     # A new vote cast this week only affects next week. Deployment froze the old zero share.
     advance(s.start - 60)
-    before = s.crvusd.balanceOf(s.receiver)
+    before = s.usdc.balanceOf(s.receiver)
     _, output = sale(s)
     sold = s.escrow.get_logs()[-1]
     assert sold.week == week and sold.yearn == 0
-    assert s.crvusd.balanceOf(s.receiver) - before == output > 0
-    assert s.crvusd.balanceOf(s.escrow.address) == 0
+    assert s.usdc.balanceOf(s.receiver) - before == output > 0
+    assert s.usdc.balanceOf(s.escrow.address) == 0
     advance(s.start + 600)
     _, output = sale(s)
     assert s.escrow.get_logs()[-1].week == s.start
-    assert s.crvusd.balanceOf(s.escrow.address) == output // 4
+    assert s.usdc.balanceOf(s.escrow.address) == output // 4
 
 
 def test_missing_weight_is_bounded_and_once_only(system):
@@ -184,7 +184,7 @@ def test_missing_weight_is_bounded_and_once_only(system):
 
 @pytest.mark.parametrize(
     "failure",
-    ["mint", "allowance", "slippage", "execution", "return", "forward"],
+    ["mint", "allowance", "slippage", "execution", "stable execution", "return", "forward"],
 )
 def test_failed_sale_rolls_back_snapshot_claim_and_transfers(system, failure):
     s = system
@@ -196,16 +196,18 @@ def test_failed_sale_rolls_back_snapshot_claim_and_transfers(system, failure):
         with boa.env.prank(s.receiver):
             s.crv.approve(s.escrow.address, 0)
     elif failure == "return":
-        s.crvusd.reject(s.receiver)
+        s.usdc.reject(s.receiver)
     elif failure == "execution":
         s.pool.configure(UNIT // 4, 9000)
+    elif failure == "stable execution":
+        s.stable_pool.configure(9000)
     elif failure == "forward":
         with boa.env.prank(s.manager):
             s.escrow.set_yearn_receiver(s.stranger)
-        s.crvusd.reject(s.stranger)
+        s.usdc.reject(s.stranger)
     minted = s.minter.minted(s.receiver, s.gauge.address)
     accrued = s.gauge.integrate_fraction(s.receiver)
-    balances = (s.crv.balanceOf(s.receiver), s.crvusd.balanceOf(s.receiver))
+    balances = (s.crv.balanceOf(s.receiver), s.usdc.balanceOf(s.receiver))
     last_sale = s.escrow.last_sale()
     amount, output = preview(s)
     with boa.env.prank(s.keeper), boa.reverts():
@@ -216,8 +218,9 @@ def test_failed_sale_rolls_back_snapshot_claim_and_transfers(system, failure):
     assert s.escrow.last_sale() == last_sale and s.escrow.canWork()
     assert s.minter.minted(s.receiver, s.gauge.address) == minted
     assert s.gauge.integrate_fraction(s.receiver) == accrued
-    assert (s.crv.balanceOf(s.receiver), s.crvusd.balanceOf(s.receiver)) == balances
-    assert s.crv.balanceOf(s.escrow.address) == s.crvusd.balanceOf(s.escrow.address) == 0
+    assert (s.crv.balanceOf(s.receiver), s.usdc.balanceOf(s.receiver)) == balances
+    assert s.crv.balanceOf(s.escrow.address) == s.usdc.balanceOf(s.escrow.address) == 0
+    assert s.crvusd.balanceOf(s.escrow.address) == 0
 
 
 def test_receiver_changes_only_future_sales_and_can_resume_accumulation(system):
@@ -232,18 +235,18 @@ def test_receiver_changes_only_future_sales_and_can_resume_accumulation(system):
         with boa.reverts("manager address"):
             s.escrow.set_yearn_receiver("0x" + "00" * 20)
         s.escrow.set_yearn_receiver(s.stranger)
-    assert s.crvusd.balanceOf(s.escrow.address) == held
+    assert s.usdc.balanceOf(s.escrow.address) == held
     advance(s.start + 7200)
     _, output = sale(s)
     event = s.escrow.get_logs()[-1]
     assert event.yearn_receiver == s.stranger and event.yearn == output // 4
-    assert s.crvusd.balanceOf(s.stranger) == event.yearn
-    assert s.crvusd.balanceOf(s.escrow.address) == held
+    assert s.usdc.balanceOf(s.stranger) == event.yearn
+    assert s.usdc.balanceOf(s.escrow.address) == held
     with boa.env.prank(s.manager):
         s.escrow.set_yearn_receiver(s.escrow.address)
     advance(s.start + 10800)
     _, output = sale(s)
-    assert s.crvusd.balanceOf(s.escrow.address) == held + output // 4
+    assert s.usdc.balanceOf(s.escrow.address) == held + output // 4
 
 
 @pytest.mark.parametrize("when", ["before", "during", "after"])
@@ -279,11 +282,11 @@ def test_split_extremes_and_rounding_conserve_output(system, share):
     s = system
     begin(s)
     s.gauge.set_vote(s.voter, share * 10**12, s.start + 52 * WEEK, s.start - 1)
-    before = s.crvusd.balanceOf(s.receiver)
+    before = s.usdc.balanceOf(s.receiver)
     _, output = sale(s)
     retained = output * share // 4
-    assert s.crvusd.balanceOf(s.escrow.address) == retained
-    assert s.crvusd.balanceOf(s.receiver) - before == output - retained
+    assert s.usdc.balanceOf(s.escrow.address) == retained
+    assert s.usdc.balanceOf(s.receiver) - before == output - retained
 
 
 def test_zero_weight_week_can_settle_pending_tail(system):
@@ -293,7 +296,7 @@ def test_zero_weight_week_can_settle_pending_tail(system):
     s.gauge.set_weight(s.start, 0, 0)
     assert s.escrow.checkpoint() == 0
     _, output = sale(s)  # The unclaimed minute before the boundary still exists.
-    assert output > 0 and s.crvusd.balanceOf(s.escrow.address) == 0
+    assert output > 0 and s.usdc.balanceOf(s.escrow.address) == 0
 
 
 def test_gauge_owns_rate_changes_and_cap_exhaustion(system):
@@ -323,7 +326,7 @@ def test_operator_minimum_is_the_only_price_policy(system):
     begin(s)
     s.pool.configure(UNIT // 20, 10000)
     _, output = sale(s)
-    assert s.crvusd.balanceOf(s.escrow.address) == output // 4
+    assert s.usdc.balanceOf(s.escrow.address) == output // 4
 
 
 def test_already_minted_crv_remains_available_to_sell(system):
@@ -401,7 +404,7 @@ def test_delayed_sale_caps_pull_and_passes_minimum_unchanged(system):
     with boa.env.prank(s.keeper):
         s.escrow.work(output, amount, True)
     event = s.escrow.get_logs()[-1]
-    assert event.crv == amount and event.crvusd == output
+    assert event.crv == amount and event.usdc == output
     assert s.crv.balanceOf(s.receiver) == available - amount
 
 
@@ -417,7 +420,7 @@ def test_quote_before_boundary_executes_with_new_week_split(system):
         s.escrow.work(output, amount, True)
     event = s.escrow.get_logs()[-1]
     assert event.week == s.start + WEEK
-    assert event.crv == amount and event.crvusd == output
+    assert event.crv == amount and event.usdc == output
     assert event.yearn == output // 2
     assert s.escrow.weeks(s.start).share == UNIT // 4
     assert s.escrow.weeks(s.start + WEEK).share == UNIT // 2
@@ -489,16 +492,16 @@ def test_proceeds_withdrawal_validates_recipient_and_preserves_balance_on_failur
     s = system
     begin(s)
     sale(s)
-    held = s.crvusd.balanceOf(s.escrow.address)
-    s.crvusd.reject(s.stranger)
+    held = s.usdc.balanceOf(s.escrow.address)
+    s.usdc.reject(s.stranger)
     with boa.env.prank(s.manager):
         for invalid in ["0x" + "00" * 20, s.escrow.address]:
             with boa.reverts("recipient"):
-                s.escrow.withdraw(s.crvusd.address, held, invalid)
+                s.escrow.withdraw(s.usdc.address, held, invalid)
         with boa.reverts("recipient rejected"):
-            s.escrow.withdraw(s.crvusd.address, held, s.stranger)
-        assert s.crvusd.balanceOf(s.escrow.address) == held
-        s.escrow.withdraw(s.crvusd.address, held // 2, s.payee)
-    assert s.crvusd.balanceOf(s.payee) == held // 2
-    assert s.crvusd.balanceOf(s.escrow.address) == held - held // 2
+            s.escrow.withdraw(s.usdc.address, held, s.stranger)
+        assert s.usdc.balanceOf(s.escrow.address) == held
+        s.escrow.withdraw(s.usdc.address, held // 2, s.payee)
+    assert s.usdc.balanceOf(s.payee) == held // 2
+    assert s.usdc.balanceOf(s.escrow.address) == held - held // 2
     assert s.escrow.yearn_receiver() == s.escrow.address

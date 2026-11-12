@@ -25,6 +25,7 @@ ADDRESSES = {
     "controller": "0x2F50D538606Fa9EDD2B11E2446BEb18C9D5846bB",
     "minter": "0xd061D61a4d941c39E5453435B6345Dc261C2fcE0",
     "pool": "0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14",
+    "stable_pool": "0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E",
 }
 CONTRACTS = {"funding": "FundingEscrow", "proceeds": "ProceedsEscrow"}
 

@@ -76,7 +76,7 @@ def chain(monkeypatch):
             address=receipt.contractAddress, abi=artifact(name)["abi"]
         )
 
-    usdc, crv, crvusd, vault, gauge, controller, minter, pool = [
+    usdc, crv, crvusd, vault, gauge, controller, minter, pool, stable_pool = [
         client.eth.contract(address=str(mock.address), abi=mock.abi)
         for mock in mocks.values()
     ]
@@ -150,7 +150,7 @@ def test_keeper_prepares_one_sale_and_report_tracks_withdrawals(chain, tmp_path)
     assert arguments["sell_vyper"] is True
     assert arguments["max_crv"] == int(result["max_crv"])
     assert arguments["max_crv"] == int(result["crv"])
-    assert arguments["min_out"] == int(result["min_crvusd"])
+    assert arguments["min_out"] == int(result["min_usdc"])
     assert not s["escrow"].functions.weeks(s["start"]).call()[0]
     submit(s, result)
     assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
@@ -159,39 +159,39 @@ def test_keeper_prepares_one_sale_and_report_tracks_withdrawals(chain, tmp_path)
     assert "budget" not in data
     assert int(data["totals"]["yearn"]) > 0
     assert data["proceeds_balance"] == data["totals"]["yearn"]
-    s["usdc"].functions.mint(s["escrow"].address, 7 * 10**6).transact()
+    s["crvusd"].functions.mint(s["escrow"].address, 7 * 10**18).transact()
     s["escrow"].functions.withdraw(
-        s["usdc"].address, 7 * 10**6, s["payee"]
+        s["crvusd"].address, 7 * 10**18, s["payee"]
     ).transact({"from": s["manager"]})
-    assert report(s["client"], s["c"])["withdrawn_crvusd"] == "0"
+    assert report(s["client"], s["c"])["withdrawn_usdc"] == "0"
     s["escrow"].functions.withdraw(
-        s["crvusd"].address, int(data["proceeds_balance"]), s["payee"]
+        s["usdc"].address, int(data["proceeds_balance"]), s["payee"]
     ).transact({"from": s["manager"]})
     withdrawn = report(s["client"], s["c"])
     assert withdrawn["proceeds_balance"] == "0"
     assert withdrawn["totals"] == data["totals"]
-    assert withdrawn["withdrawn_crvusd"] == data["proceeds_balance"]
-    assert s["crvusd"].functions.balanceOf(s["payee"]).call() == int(data["proceeds_balance"])
+    assert withdrawn["withdrawn_usdc"] == data["proceeds_balance"]
+    assert s["usdc"].functions.balanceOf(s["payee"]).call() == int(data["proceeds_balance"])
 
 
 def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain, tmp_path):
     s = chain
     begin(s)
     submit(s, run(s["client"], s["c"], directory=tmp_path))
-    held = s["crvusd"].functions.balanceOf(s["escrow"].address).call()
+    held = s["usdc"].functions.balanceOf(s["escrow"].address).call()
     s["escrow"].functions.set_yearn_receiver(s["payee"]).transact(
         {"from": s["manager"]}
     )
-    before = s["crvusd"].functions.balanceOf(s["payee"]).call()
+    before = s["usdc"].functions.balanceOf(s["payee"]).call()
     s["tester"].time_travel(s["start"] + 80000)
     s["tester"].mine_block()
     submit(s, run(s["client"], s["c"], directory=tmp_path))
     data = report(s["client"], s["c"])
-    forwarded = s["crvusd"].functions.balanceOf(s["payee"]).call() - before
+    forwarded = s["usdc"].functions.balanceOf(s["payee"]).call() - before
     assert forwarded > 0
     assert data["yearn_receiver"] == s["payee"]
     assert data["proceeds_balance"] == str(held)
-    assert data["forwarded_crvusd"] == str(forwarded)
+    assert data["forwarded_usdc"] == str(forwarded)
     assert int(data["totals"]["yearn"]) == held + forwarded
 
 
@@ -229,7 +229,7 @@ def test_keeper_quotes_only_yearns_crv_and_reports_retention(chain, tmp_path, mo
     assert args["max_crv"] == 100 * 10**18
     assert quoted["swap_crv"] == result["swap_crv"] == str(25 * 10**18)
     assert quoted["vyper_crv"] == result["vyper_crv"] == str(75 * 10**18)
-    assert args["min_out"] == int(quoted["crvusd"]) * 995 // 1000
+    assert args["min_out"] == int(quoted["usdc"]) * 995 // 1000
     assert not s["escrow"].functions.weeks(s["start"]).call()[0]
     submit(s, result)
     data = report(s["client"], s["c"])
@@ -252,7 +252,7 @@ def test_keeper_can_retain_entire_batch_with_zero_yearn_share(chain, tmp_path):
     s["tester"].mine_block()
     result = run(s["client"], s["c"], directory=tmp_path)
     assert result["status"] == "retain"
-    assert result["swap_crv"] == result["min_crvusd"] == "0"
+    assert result["swap_crv"] == result["min_usdc"] == "0"
     assert result["vyper_crv"] == result["crv"] == str(100 * 10**18)
     submit(s, result)
     data = report(s["client"], s["c"])
@@ -298,10 +298,10 @@ def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
     with pytest.raises(SystemExit):
         prepare("set-cooldown", "--seconds", "599")
     for role in ["manager", "governance"]:
-        s["crvusd"].functions.mint(s["escrow"].address, 123 * 10**18).transact()
+        s["usdc"].functions.mint(s["escrow"].address, 123 * 10**6).transact()
         withdrawal = prepare(
-            "withdraw", "--token", s["crvusd"].address,
-            "--amount-raw", str(123 * 10**18), "--recipient", s["payee"],
+            "withdraw", "--token", s["usdc"].address,
+            "--amount-raw", str(123 * 10**6), "--recipient", s["payee"],
             *(["--governance"] if role == "governance" else []),
         )
         assert withdrawal["meta"]["safeAddress"] == s[role]
@@ -311,7 +311,7 @@ def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
                 **{k: withdrawal["transactions"][0][k] for k in ["to", "data"]},
             }
         )
-    assert s["crvusd"].functions.balanceOf(s["payee"]).call() == 246 * 10**18
+    assert s["usdc"].functions.balanceOf(s["payee"]).call() == 246 * 10**6
     assert s["escrow"].functions.yearn_receiver().call() == s["payee"]
     s["crv"].functions.mint(s["escrow"].address, 10 * 10**18).transact()
     withdrawal = prepare(
@@ -551,7 +551,7 @@ def test_prepared_keeper_sale_can_land_in_next_week(chain, tmp_path):
         from_block=receipt.blockNumber, to_block=receipt.blockNumber
     )[0]["args"]
     assert sold["week"] == boundary
-    assert sold["yearn"] == sold["crvusd"] // 2
+    assert sold["yearn"] == sold["usdc"] // 2
     assert sold["crv"] == int(prepared["max_crv"])
 
 

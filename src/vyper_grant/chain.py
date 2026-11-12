@@ -96,11 +96,11 @@ def report(client, c):
         )
         if a["yearn_receiver"] != proceeds.address:
             forwarded += a["yearn"]
-        if a["yearn"] > a["crvusd"]:
+        if a["yearn"] > a["usdc"]:
             raise ValueError("Sale conservation mismatch")
         for key, field in [
             ("sold", "crv"),
-            ("output", "crvusd"),
+            ("output", "usdc"),
             ("yearn", "yearn"),
             ("vyper_crv", "vyper_crv"),
         ]:
@@ -134,12 +134,12 @@ def report(client, c):
         proceeds=proceeds.address,
         start=start,
         yearn_receiver=read(proceeds.functions.yearn_receiver()),
-        forwarded_crvusd=forwarded,
+        forwarded_usdc=forwarded,
         payments=payments,
         spent=sum(p["usdc"] for p in payments),
         funding_assets=read(funding.functions.assets()),
         proceeds_balance=read(
-            contract(client, "token", ADDRESSES["crvusd"]).functions.balanceOf(
+            contract(client, "token", ADDRESSES["usdc"]).functions.balanceOf(
                 proceeds.address
             )
         ),
@@ -150,10 +150,10 @@ def report(client, c):
             k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "yearn", "vyper_crv"]
         },
         weeks=sorted(rows.values(), key=lambda r: r["week"]),
-        withdrawn_crvusd=sum(
+        withdrawn_usdc=sum(
             e["args"]["amount"]
             for e in withdrawals
-            if e["args"]["token"] == ADDRESSES["crvusd"]
+            if e["args"]["token"] == ADDRESSES["usdc"]
         ),
         withdrawn_crv=sum(
             e["args"]["amount"]

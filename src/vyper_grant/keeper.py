@@ -16,7 +16,7 @@ def quote_work(escrow, c, block):
         "crv": amount,
         "swap_crv": swap,
         "vyper_crv": amount - swap,
-        "crvusd": f.quote(swap).call(block_identifier=block),
+        "usdc": f.quote(swap).call(block_identifier=block),
         "sell_vyper": sell_vyper,
     }
 
@@ -60,7 +60,7 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False,
             action = {"status": "checkpoint"}
             if not checkpoint_only and can_work and authorized:
                 quote = quote_work(escrow, c, block)
-                amount, output = quote["crv"], quote["crvusd"]
+                amount, output = quote["crv"], quote["usdc"]
                 minimum = output * (10000 - c["slippage_bps"]) // 10000
                 if amount > 0 and (quote["swap_crv"] == 0 or minimum > 0) and (closing or amount >= units(c["min_trade_crv"])):
                     fn = f.work(minimum, amount, quote["sell_vyper"])
@@ -72,7 +72,7 @@ def run(client, c, send=False, directory="output/keeper", checkpoint_only=False,
                         "sell_vyper": quote["sell_vyper"],
                         "max_crv": str(amount),
                         "week": week,
-                        "min_crvusd": str(minimum),
+                        "min_usdc": str(minimum),
                     }
                 elif not snapshot_due:
                     return {"status": "below minimum"}

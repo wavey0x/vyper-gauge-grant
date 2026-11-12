@@ -19,16 +19,16 @@ def test_retaining_then_selling_preserves_previous_vyper_crv(system, forward):
     swapped = amount // 4
     output = s.escrow.quote(swapped)
     destination = s.payee if forward else s.escrow.address
-    before = s.crvusd.balanceOf(destination)
-    before_vyper_usd = s.crvusd.balanceOf(s.receiver)
+    before = s.usdc.balanceOf(destination)
+    before_vyper_usd = s.usdc.balanceOf(s.receiver)
     with boa.env.prank(s.keeper):
         s.escrow.work(output, amount, False)
     event = s.escrow.get_logs()[-1]
     reserved = 7 * UNIT + amount - swapped
     assert event.crv == swapped and event.vyper_crv == amount - swapped
-    assert event.yearn == event.crvusd == output
-    assert s.crvusd.balanceOf(destination) - before == output
-    assert s.crvusd.balanceOf(s.receiver) == before_vyper_usd
+    assert event.yearn == event.usdc == output
+    assert s.usdc.balanceOf(destination) - before == output
+    assert s.usdc.balanceOf(s.receiver) == before_vyper_usd
     assert s.crv.balanceOf(s.escrow.address) == reserved
     advance(s.escrow.last_sale() + 600)
     sale(s)  # True sells the new batch, without selling any retained CRV.
@@ -50,10 +50,10 @@ def test_retained_split_extremes_and_rounding(system, share):
         s.escrow.work(output, amount, False)
     event = s.escrow.get_logs()[-1]
     assert event.crv + event.vyper_crv == amount
-    assert event.crv == swapped and event.yearn == event.crvusd == output
+    assert event.crv == swapped and event.yearn == event.usdc == output
     assert s.crv.balanceOf(s.pool.address) - before_pool == swapped
     assert s.crv.balanceOf(s.escrow.address) == amount - swapped
-    assert s.crvusd.balanceOf(s.escrow.address) == output
+    assert s.usdc.balanceOf(s.escrow.address) == output
     assert not s.escrow.canWork()  # The cooldown also applies when no swap occurred.
 
 
@@ -69,7 +69,7 @@ def test_zero_yearn_share_requires_zero_minimum_and_skips_swap(system):
         s.escrow.work(0, 10 * UNIT, False)
     assert s.crv.balanceOf(s.pool.address) == before_pool
     assert s.crv.balanceOf(s.escrow.address) == 10 * UNIT
-    assert s.escrow.get_logs()[-1].crvusd == 0
+    assert s.escrow.get_logs()[-1].usdc == 0
 
 
 def test_retained_crv_cannot_be_sold_after_gauge_exhaustion(system):
@@ -92,7 +92,7 @@ def test_retained_crv_cannot_be_sold_after_gauge_exhaustion(system):
 def test_vyper_withdraws_crv_while_paused_without_access_to_other_tokens(system):
     s = system
     s.crv.mint(s.escrow.address, 10 * UNIT)
-    s.crvusd.mint(s.escrow.address, UNIT)
+    s.usdc.mint(s.escrow.address, 10**6)
     with boa.env.prank(s.manager):
         s.escrow.set_paused(True)
     for account in [s.manager, s.escrow.GOVERNANCE(), s.keeper, s.stranger]:
@@ -100,7 +100,7 @@ def test_vyper_withdraws_crv_while_paused_without_access_to_other_tokens(system)
             s.escrow.withdraw(s.crv.address, UNIT, s.payee)
     with boa.env.prank(s.receiver):
         with boa.reverts("management"):
-            s.escrow.withdraw(s.crvusd.address, UNIT, s.payee)
+            s.escrow.withdraw(s.usdc.address, 10**6, s.payee)
         for recipient in ["0x" + "00" * 20, s.escrow.address]:
             with boa.reverts("recipient"):
                 s.escrow.withdraw(s.crv.address, UNIT, recipient)
@@ -110,7 +110,7 @@ def test_vyper_withdraws_crv_while_paused_without_access_to_other_tokens(system)
         s.escrow.withdraw(s.crv.address, 3 * UNIT, s.stranger)
     assert s.crv.balanceOf(s.stranger) == 3 * UNIT
     assert s.crv.balanceOf(s.escrow.address) == 7 * UNIT
-    assert s.crvusd.balanceOf(s.escrow.address) == UNIT
+    assert s.usdc.balanceOf(s.escrow.address) == 10**6
 
 
 def test_failed_yearn_forward_rolls_back_new_crv_retention(system):
@@ -119,7 +119,7 @@ def test_failed_yearn_forward_rolls_back_new_crv_retention(system):
     s.crv.mint(s.escrow.address, 7 * UNIT)
     with boa.env.prank(s.manager):
         s.escrow.set_yearn_receiver(s.stranger)
-    s.crvusd.reject(s.stranger)
+    s.usdc.reject(s.stranger)
     minted = s.minter.minted(s.receiver, s.gauge.address)
     last_sale = s.escrow.last_sale()
     with boa.env.prank(s.keeper), boa.reverts("recipient rejected"):

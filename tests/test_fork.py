@@ -62,8 +62,10 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         ctrl = boa.loads_abi(json.dumps(ctrl_abi)).at(A["controller"])
         pool = attach("pool", A["pool"])
         assert pool.coins(0) == A["crvusd"] and pool.coins(2) == A["crv"]
+        stable_pool = attach("stable_pool", A["stable_pool"])
+        assert stable_pool.coins(0) == A["usdc"] and stable_pool.coins(1) == A["crvusd"]
         voter = A["voter"]
-        keeper, payee = [boa.env.generate_address() for _ in range(2)]
+        keeper, payee, funding_payee = [boa.env.generate_address() for _ in range(3)]
         start = (boa.env.evm.patch.timestamp // WEEK + 1) * WEEK
         funding = boa.load(str(ROOT / "contracts/FundingEscrow.vy"))
         escrow = boa.load(
@@ -89,10 +91,10 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             ctrl.vote_for_gauge_weights(A["gauge"], power)
         with boa.env.prank(A["manager"]):
             assert funding.recipient() == "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8"
-            funding.set_recipient(payee)
+            funding.set_recipient(funding_payee)
             funding.fund_round(2000 * 10**6)
             escrow.set_keeper(keeper, True)
-        assert usdc.balanceOf(payee) == 0
+        assert usdc.balanceOf(funding_payee) == 0
         assert funding.next_week() == start and not funding.canWork()
         assert usdc.balanceOf(funding.address) == 0
         with boa.env.anchor(), boa.env.prank(A["governance"]):
@@ -111,19 +113,21 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
                 output = escrow.quote(swapped)
             before_crv = crv.balanceOf(A["receiver"])
             before_retained = crv.balanceOf(escrow.address)
+            before_intermediate = crvusd.balanceOf(escrow.address)
             before_minted = minter.minted(A["receiver"], A["gauge"])
-            before_usd = crvusd.balanceOf(A["receiver"])
-            before_held = crvusd.balanceOf(escrow.address)
+            before_usd = usdc.balanceOf(A["receiver"])
+            before_held = usdc.balanceOf(escrow.address)
             destination = escrow.yearn_receiver()
-            before_destination = crvusd.balanceOf(destination)
+            before_destination = usdc.balanceOf(destination)
             with boa.env.prank(keeper):
                 escrow.work(
                     output * 995 // 1000,
                     amount, sell_vyper,
                 )
             event = escrow.get_logs(include_child_logs=False)[-1]
-            assert event.crv == swapped and event.crvusd == output
+            assert event.crv == swapped and event.usdc == output
             assert event.vyper_crv == amount - swapped
+            assert crvusd.balanceOf(escrow.address) == before_intermediate
             assert crv.balanceOf(A["receiver"]) == (
                 before_crv + minter.minted(A["receiver"], A["gauge"]) - before_minted - amount
             )
@@ -132,17 +136,17 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
                 A["receiver"], A["gauge"]
             )
             assert event.yearn_receiver == destination
-            assert crvusd.balanceOf(destination) - before_destination == event.yearn
-            assert crvusd.balanceOf(escrow.address) - before_held == (
+            assert usdc.balanceOf(destination) - before_destination == event.yearn
+            assert usdc.balanceOf(escrow.address) - before_held == (
                 event.yearn if destination == escrow.address else 0
             )
-            assert crvusd.balanceOf(A["receiver"]) - before_usd == output - event.yearn
+            assert usdc.balanceOf(A["receiver"]) - before_usd == output - event.yearn
             return event
 
         # Retention also works before Yearn's vote is effective, without a swap.
         with boa.env.anchor():
             retained = sell(100 * 10**18, False)
-            assert retained.crv == retained.crvusd == retained.yearn == 0
+            assert retained.crv == retained.usdc == retained.yearn == 0
             assert retained.vyper_crv == 100 * 10**18
             boa.env.time_travel(seconds=600)
             sell(100 * 10**18)
@@ -165,13 +169,13 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         assert funding.canWork()
         with boa.env.prank(keeper):
             funding.work()
-        assert usdc.balanceOf(payee) == 1000 * 10**6
+        assert usdc.balanceOf(funding_payee) == 1000 * 10**6
         assert funding.next_week() == start + WEEK
         assert not escrow.weeks(start).ready
         first = sell()
         share = escrow.weeks(start).share
         assert 0 < share < 10**18
-        assert first.week == start and first.yearn == first.crvusd * share // 10**18
+        assert first.week == start and first.yearn == first.usdc * share // 10**18
         with boa.env.anchor():
             assert escrow.claimable() == 0
 
@@ -180,7 +184,7 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
             retained = sell(sell_vyper=False)
             held_crv = crv.balanceOf(escrow.address)
             assert held_crv == retained.vyper_crv > 0
-            assert retained.crvusd == retained.yearn > 0
+            assert retained.usdc == retained.yearn > 0
             boa.env.time_travel(seconds=600)
             sell()
             assert crv.balanceOf(escrow.address) == held_crv
@@ -203,11 +207,11 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
         boa.env.time_travel(seconds=600)
         with boa.env.prank(keeper):
             funding.work()
-        assert usdc.balanceOf(payee) == 2000 * 10**6
+        assert usdc.balanceOf(funding_payee) == 2000 * 10**6
         assert not funding.canWork()
         tail = sell()
         assert tail.week == start + WEEK
-        assert tail.yearn == tail.crvusd * escrow.weeks(start + WEEK).share // 10**18 > 0
+        assert tail.yearn == tail.usdc * escrow.weeks(start + WEEK).share // 10**18 > 0
 
         # Checkpoint before replacing Yearn's vote, after the real ten-day delay.
         boa.env.time_travel(
@@ -248,13 +252,13 @@ def test_real_vault_gauge_week_boundaries_and_atomic_sales():
 
         boa.env.time_travel(seconds=start + 4 * WEEK + 60 - boa.env.evm.patch.timestamp)
         assert sell().yearn == 0
-        held = crvusd.balanceOf(escrow.address)
-        before = crvusd.balanceOf(payee)
+        held = usdc.balanceOf(escrow.address)
+        before = usdc.balanceOf(payee)
         with boa.env.prank(A["manager"]):
-            escrow.withdraw(A["crvusd"], held // 2, payee)
+            escrow.withdraw(A["usdc"], held // 2, payee)
         assert escrow.GOVERNANCE() == A["governance"]
         with boa.env.prank(A["governance"]):
-            escrow.withdraw(A["crvusd"], held - held // 2, payee)
-        assert held > 0 and crvusd.balanceOf(payee) == before + held
-        assert crvusd.balanceOf(escrow.address) == 0
+            escrow.withdraw(A["usdc"], held - held // 2, payee)
+        assert held > 0 and usdc.balanceOf(payee) == before + held
+        assert usdc.balanceOf(escrow.address) == 0
         assert escrow.get_logs(include_child_logs=False)[-1].recipient == payee

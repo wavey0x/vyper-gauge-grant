@@ -109,7 +109,7 @@ def doctor(client, c):
 
 def main():
     p = argparse.ArgumentParser(
-        description="Vyper programme: vault funding and crvUSD proceeds"
+        description="Vyper programme: vault funding and USDC proceeds"
     )
     p.add_argument("--config", default="config/live.json")
     p.add_argument("--out", default="output")
