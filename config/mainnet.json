@@ -1,0 +1,11 @@
+{
+  "funding": "0x3602642D28fA686ff74d4C85aF5B6fBe8722CCD8",
+  "proceeds": "0x38cf14DaC1329ff404739379004909c6847ab3aC",
+  "deployment_block": 26451282,
+  "keeper": null,
+  "min_trade_crv": "100",
+  "max_crv": "15000",
+  "sell_vyper": true,
+  "slippage_bps": 50,
+  "max_gas_gwei": "20"
+}

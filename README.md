@@ -9,6 +9,23 @@ The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers,
 
 The [dashboard](dashboard/demo/index.html) has two balances, weekly proceeds and an expandable list of dated funding payments. Its [preview](dashboard/preview.png) uses illustrative data. See [accounting](docs/accounting.md) and [verification](docs/verification.md).
 
+## Ethereum mainnet deployment
+
+The current contracts were deployed on November 19, 2026. Both have verified Vyper 0.4.3 source on Etherscan.
+
+| Contract | Address | Deployment transaction | Block |
+| --- | --- | --- | ---: |
+| FundingEscrow | [0x3602642D28fA686ff74d4C85aF5B6fBe8722CCD8](https://etherscan.io/address/0x3602642D28fA686ff74d4C85aF5B6fBe8722CCD8#code) | [0x43040239602b2f8f9477f34f2bf4a2036c21850683a90a07ebf6f57630fe9658](https://etherscan.io/tx/0x43040239602b2f8f9477f34f2bf4a2036c21850683a90a07ebf6f57630fe9658) | 26451282 |
+| ProceedsEscrow | [0x38cf14DaC1329ff404739379004909c6847ab3aC](https://etherscan.io/address/0x38cf14DaC1329ff404739379004909c6847ab3aC#code) | [0x93060472fe1b36cebe85c954b2f0d180fc4bbfc28e58cc9cc99af3bf5d0e840c](https://etherscan.io/tx/0x93060472fe1b36cebe85c954b2f0d180fc4bbfc28e58cc9cc99af3bf5d0e840c) | 26451283 |
+
+The tracked [mainnet config](config/mainnet.json) contains these addresses and the first deployment block. Copy it to the ignored local config before running operational commands:
+
+```sh
+cp config/mainnet.json config/live.json
+```
+
+Keeper authorization, Vyper's approvals and funding are separate setup steps; the tracked config leaves `keeper` unset.
+
 ## Permissions
 
 | Function | Who can call |
@@ -48,18 +65,22 @@ Build updates `abi/contracts.json` and the artifacts in `build/`. Commit generat
 
 Both constructors take **no arguments**: `FundingEscrow()` and `ProceedsEscrow()`. Mainnet dependencies and management addresses are constants. The funding recipient defaults to fee burner `0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8`; management can change it with `set-recipient --account ADDRESS`.
 
-To deploy both contracts using the encrypted Brownie account `wavey3` and verify their source on Etherscan:
+For a future fresh deployment of both contracts using the encrypted Brownie account `wavey3`, use new config and journal paths. The script verifies their source on Etherscan before the new config becomes active locally:
 
 ```sh
-uv run --extra dev python -m vyper_grant.deploy --account wavey3 --broadcast
+uv run --extra dev python -m vyper_grant.deploy --account wavey3 \
+  --config output/new-live.json --journal build/new-deployment.json --broadcast \
+  && cp output/new-live.json config/live.json
 ```
 
 The script prompts locally for the keystore password and uses `ETHEREUM_RPC_URL` (or `MAINNET_RPC_URL`) and `ETHERSCAN_KEY`. It compiles the exact Vyper standard JSON submitted to Etherscan and checks that it matches the committed bytecode before signing. It uses the account's existing Brownie keystore with the project's signer; Brownie itself is not needed. Without `--broadcast`, it only estimates gas and reads the account's public address.
 
-The script records each transaction hash before broadcasting in `build/deployment.json`, then saves confirmed addresses and the first deployment block in `config/live.json`. Keep the journal: repeating the command resumes recorded deployments instead of deploying duplicates. An unresolved recorded transaction must be investigated before proceeding. If only verification needs retrying, run:
+The script records each transaction hash before broadcasting in the selected journal, then saves confirmed addresses and the first deployment block in the selected config. Keep the journal: repeating the command resumes recorded deployments instead of deploying duplicates. An unresolved recorded transaction must be investigated before proceeding. If only verification needs retrying, run:
 
 ```sh
-uv run --extra dev python -m vyper_grant.deploy --verify-only
+uv run --extra dev python -m vyper_grant.deploy \
+  --config output/new-live.json --journal build/new-deployment.json --verify-only \
+  && cp output/new-live.json config/live.json
 ```
 
 Deployment grants no keeper permission and funds neither contract. Set the dedicated `keeper` in `config/live.json`, then prepare the two setup batches:
@@ -115,26 +136,4 @@ Run `ops/run.sh funding-keeper` on the same polling schedule for funding payment
 
 `recover funding --token ADDRESS --amount-raw INTEGER` prepares a funding recovery to the manager; add `--governance` for a **ychad.eth** clawback to governance. Recover yvUSDC-1 shares directly to avoid relying on vault redemption. Recovering vault shares also cancels pending funding payments. Recovery is independent of the seller and the vault's withdrawal availability; it does not reverse payments already made. The governance address is pinned to its ENS resolution verified on November 10, 2026, not resolved dynamically by the contract.
 
-Funding amounts remain 6-decimal USDC; proceeds quotes, minimums, balances and allocations are also 6-decimal USDC. The quote command returns `usdc`, keeper output uses `min_usdc`, and reports use `forwarded_usdc` / `withdrawn_usdc`. Regenerate reports from the USDC deployment; old crvUSD reports use different units and field names.
-
-Earlier crvUSD proceeds deployments do not implement this USDC route. The `work(min_out, max_crv, sell_vyper)` signature stays the same, but `min_out` and quoted proceeds now use 6-decimal USDC units; update keeper configuration and integrations together with the deployment. These changes require a fresh proceeds deployment and new Vyper approvals for its address. The older immediate-draw funding deployment also needs replacement to support scheduled payments. Do not reuse an old deployment journal for changed bytecode.
-
-
-To replace only proceeds, use a separate config with the existing funding address and original `deployment_block`, but `proceeds: null`. Keep the old journal and select a new journal file:
-
-```sh
-uv run --extra dev python -m vyper_grant.deploy --account wavey3 --only proceeds \
-  --config output/proceeds-v4.json --journal build/proceeds-v4.json --broadcast
-```
-
-After deployment and verification, use the replacement config for setup and operation (or copy it to `config/live.json`). Keep the old seller disabled; obtain Vyper's token and minter approvals for the new address and enable the keeper there. The script never changes either existing onchain contract.
-
-
-To replace funding with the weekly-payment version, prepare a separate config with `funding: null`, preserving the current proceeds address and reporting block, and use a fresh journal:
-
-```sh
-uv run --extra dev python -m vyper_grant.deploy --account wavey3 --only funding \
-  --config output/funding-v2.json --journal build/funding-v2.json --broadcast
-```
-
-Then recover yvUSDC-1 from the old funding escrow and transfer shares into the replacement. Use the replacement config for funding commands and reports. Funding needs no token approvals from Vyper and no keeper setup. This funding change does not alter ProceedsEscrow. No live configuration, approvals or token balances are migrated automatically.
+Funding amounts use 6-decimal USDC; proceeds quotes, minimums, balances and allocations also use 6-decimal USDC. The quote command returns `usdc`, keeper output uses `min_usdc`, and reports use `forwarded_usdc` / `withdrawn_usdc`.
