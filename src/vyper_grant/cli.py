@@ -16,7 +16,9 @@ from .core import (
     rpc,
     units,
 )
-from .chain import historical_vote, report, serialize, verify
+from .chain import enabled_keepers, historical_vote, report, serialize, verify
+
+PROCEEDS_GAS = 1_000_000  # the constructor may pay the controller's weekly update (~892k)
 from .report import render
 
 
@@ -44,6 +46,8 @@ def deployment(client, c, name, deployer):
     tx = factory.constructor().build_transaction(
         {"from": address(deployer), "chainId": 1}
     )
+    # The single gas rule for signed, unsigned and cost-estimate paths.
+    tx["gas"] = tx["gas"] * 12 // 10 + (PROCEEDS_GAS if name == "proceeds" else 0)
     return {
         "contract": CONTRACTS[name],
         "constructor_arguments": [],
@@ -51,16 +55,40 @@ def deployment(client, c, name, deployer):
     }
 
 
-def setup(client, c, allowance):
+def allowance_calls(client, spender, amount):
+    """CRV only changes an allowance to or from zero, so always reset first; amount is the new total."""
+    crv = contract(client, "token", A["crv"]).functions
+    return [crv.approve(spender, 0)] + ([crv.approve(spender, amount)] if amount else [])
+
+
+def setup(client, c, allowance, replace=None, replace_block=None):
     (escrow,) = verify(client, c, names=("proceeds",))
     m = contract(client, "minter").functions
-    calls = [
-        contract(client, "token", A["crv"]).functions.approve(escrow.address, allowance)
-    ]
-    if not m.allowed_to_mint_for(escrow.address, A["receiver"]).call():
-        calls.append(m.toggle_approve_mint(escrow.address))
-    manager = [escrow.functions.set_keeper(address(c["keeper"]), True)]
-    return batch(A["receiver"], *calls), batch(A["manager"], *manager)
+    block = client.eth.block_number
+    vyper, manager = [], []
+    if replace:
+        old_address = address(replace)
+        if old_address == escrow.address:
+            raise ValueError("The escrow being replaced must differ from the configured one")
+        if replace_block is None:
+            raise ValueError("--replace-block, the old escrow's creation block, is required")
+        # Only the current ProceedsEscrow build is handled; revoke older sellers manually.
+        (old,) = verify(client, {"proceeds": old_address}, names=("proceeds",))
+        if not old.functions.paused().call(block_identifier=block):
+            manager.append(old.functions.set_paused(True))
+        for account in enabled_keepers(client, old, replace_block):
+            manager.append(old.functions.set_keeper(account, False))
+        vyper += allowance_calls(client, old.address, 0)
+        if m.allowed_to_mint_for(old.address, A["receiver"]).call(block_identifier=block):
+            vyper.append(m.toggle_approve_mint(old.address))
+    vyper += allowance_calls(client, escrow.address, allowance)
+    # toggle_approve_mint flips the flag, so it is built from this read and must run once.
+    mint = m.allowed_to_mint_for(escrow.address, A["receiver"]).call(block_identifier=block)
+    if not mint:
+        vyper.append(m.toggle_approve_mint(escrow.address))
+    manager.append(escrow.functions.set_keeper(address(c["keeper"]), True))
+    meta = {"readBlock": block, "mintEnabledAtRead": mint}
+    return batch(A["receiver"], *vyper, **meta), batch(A["manager"], *manager, readBlock=block)
 
 
 def doctor(client, c):
@@ -104,6 +132,21 @@ def doctor(client, c):
                 .call()
             ),
         )
+        if c.get("operating"):
+            result["problems"] = [
+                text
+                for failed, text in [
+                    (not result["mint_enabled"], "Vyper's mint permission is off"),
+                    (result["crv_allowance"] == "0", "Vyper's CRV allowance is zero"),
+                    (not result["keeper_enabled"], "The keeper is not enabled"),
+                ]
+                if failed
+            ]
+    result["creation_check"] = {
+        n: "creation transaction" if c.get(n + "_tx") else "runtime only"
+        for n in ["funding", "proceeds"]
+        if c.get(n)
+    }
     return result
 
 
@@ -121,6 +164,10 @@ def main():
     d.add_argument("--deployer", required=True)
     s = sub.add_parser("setup")
     s.add_argument("--allowance-crv", required=True)
+    s.add_argument("--replace", help="Previous ProceedsEscrow to pause and revoke")
+    s.add_argument("--replace-block", type=int, help="Creation block of the previous escrow")
+    s = sub.add_parser("allowance", help="Vyper batch that only resets the CRV allowance")
+    s.add_argument("--crv", required=True, help="New total allowance in CRV")
     f = sub.add_parser("fund-round")
     f.add_argument("--usdc", required=True)
     f.add_argument("--reference", help="Human-readable Safe description")
@@ -182,7 +229,9 @@ def main():
             print(str((out / "index.html").resolve()))
             return
         elif args.command == "setup":
-            vyper, manager = setup(client, c, units(args.allowance_crv))
+            vyper, manager = setup(
+                client, c, units(args.allowance_crv), args.replace, args.replace_block
+            )
             atomic_json(out / "setup-vyper.safe.json", vyper)
             atomic_json(out / "setup-manager.safe.json", manager)
             print("Prepared Vyper and manager setup batches")
@@ -212,6 +261,21 @@ def main():
                 ef = escrow.functions
             meta = {}
             sender = A["manager"]
+            if args.command == "allowance":
+                block = client.eth.block_number
+                current = contract(client, "token", A["crv"]).functions.allowance(
+                    A["receiver"], escrow.address
+                ).call(block_identifier=block)
+                result = batch(
+                    A["receiver"],
+                    *allowance_calls(client, escrow.address, units(args.crv)),
+                    readBlock=block,
+                    allowanceAtRead=str(current),
+                )
+                path = out / "allowance-vyper.safe.json"
+                atomic_json(path, result)
+                print(str(path))
+                return
             if args.command == "quote":
                 from .keeper import quote_work
 
@@ -227,9 +291,23 @@ def main():
                     sender = A["governance"]
                 fn = funding.functions.cancel()
             elif args.command == "set-missing-weight":
-                historical = historical_vote(
-                    client, args.week, client.eth.get_block("finalized")
-                )
+                if args.week < ef.DEPLOYED_WEEK().call():
+                    raise ValueError("The week predates this escrow")
+                if ef.weeks(args.week).call()[0]:
+                    raise ValueError("The week already has a snapshot")
+                try:
+                    historical = historical_vote(
+                        client,
+                        args.week,
+                        client.eth.get_block("finalized"),
+                        c.get("deployment_block"),
+                    )
+                except ValueError:
+                    raise
+                except Exception:
+                    raise ValueError(
+                        "The RPC cannot serve historical state for this week; use an archive node"
+                    ) from None
                 yearn_weight = historical["slope"] * max(
                     historical["end"] - args.week, 0
                 )
@@ -267,11 +345,10 @@ def main():
         atomic_json(path, result)
         print(str(path))
     except Exception as error:
-        # Provider errors may contain authenticated endpoint URLs.
+        # Only this tool's own messages are printed; provider errors can contain secrets.
         message = (
             str(error)
-            if isinstance(error, (ValueError, FileNotFoundError))
-            and "http" not in str(error).lower()
+            if type(error) in (ValueError, FileNotFoundError) and "://" not in str(error)
             else type(error).__name__
         )
         print("Error: " + message, file=sys.stderr)

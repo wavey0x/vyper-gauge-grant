@@ -10,6 +10,7 @@ from web3.exceptions import ContractLogicError
 from conftest import deploy_mocks
 from vyper_grant.core import ADDRESSES, ROOT, WEEK, artifact
 from vyper_grant.chain import verify, report, historical_vote
+from vyper_grant.chain import enabled_keepers
 from vyper_grant.cli import setup, doctor, deployment, main
 from vyper_grant import keeper as keeper_module
 from vyper_grant.keeper import run
@@ -80,6 +81,7 @@ def chain(monkeypatch):
             client.eth.send_transaction(prepared["transaction"])
         )
         c[name] = receipt.contractAddress
+        c[name + "_tx"] = Web3.to_hex(receipt.transactionHash)
         return client.eth.contract(
             address=receipt.contractAddress, abi=artifact(name)["abi"]
         )
@@ -139,7 +141,8 @@ def test_verified_contracts_and_idempotent_setup(chain):
     prepared = deployment(s["client"], {}, "funding", s["deployer"])
     assert prepared["constructor_arguments"] == []
     vyper, manager = setup(s["client"], {**s["c"], "funding": None}, 10**25)
-    assert len(vyper["transactions"]) == len(manager["transactions"]) == 1
+    assert len(vyper["transactions"]) == 2 and len(manager["transactions"]) == 1
+    assert vyper["meta"]["mintEnabledAtRead"] is True
     assert doctor(s["client"], s["c"])["mint_enabled"]
     assert doctor(s["client"], {**s["c"], "funding": None})["mint_enabled"]
     assert s["escrow"].functions.DEPLOYED_WEEK().call() == s["start"] - WEEK
@@ -609,6 +612,12 @@ def test_pending_nonce_prevents_another_submission(chain, tmp_path, monkeypatch)
     assert run(s["client"], s["c"], True, tmp_path)["status"] == "pending nonce"
 
 
+def set_allowance(s, amount):
+    crv = s["crv"].functions
+    crv.approve(s["escrow"].address, 0).transact({"from": s["receiver"]})
+    crv.approve(s["escrow"].address, amount).transact({"from": s["receiver"]})
+
+
 def selector(fn):
     return fn._encode_transaction_data()[:10]
 
@@ -635,7 +644,7 @@ def test_allowance_caps_sales_and_exhaustion_is_reported(chain, tmp_path):
     s = chain
     begin(s)
     s["c"].update(min_trade_crv="10")
-    s["crv"].functions.approve(s["escrow"].address, 50 * 10**18).transact({"from": s["receiver"]})
+    set_allowance(s, 50 * 10**18)
     result = run(s["client"], s["c"], directory=tmp_path)
     assert result["status"] == "sale" and result["crv"] == str(50 * 10**18)
     assert result["allowance"] == str(50 * 10**18) and result["mint_enabled"]
@@ -646,7 +655,7 @@ def test_allowance_caps_sales_and_exhaustion_is_reported(chain, tmp_path):
         "status": "allowance exhausted", "allowance": "0", "mint_enabled": True,
     }
     # A positive allowance below the minimum still funds the closing sale.
-    s["crv"].functions.approve(s["escrow"].address, 5 * 10**18).transact({"from": s["receiver"]})
+    set_allowance(s, 5 * 10**18)
     boundary = s["start"] + WEEK
     s["tester"].time_travel(boundary - 300)
     s["tester"].mine_block()
@@ -681,7 +690,7 @@ def test_dust_skips_the_sale_but_records_a_due_snapshot(chain, tmp_path, amount,
     begin(s)
     if raw_quote is not None:
         assert s["escrow"].functions.quote(amount).call() == raw_quote
-    s["crv"].functions.approve(s["escrow"].address, amount).transact({"from": s["receiver"]})
+    set_allowance(s, amount)
     result = run(s["client"], s["c"], directory=tmp_path)
     assert result["status"] == "checkpoint" and result["sale"] == "dust"
     submit(s, result)
@@ -899,3 +908,128 @@ def test_final_decision_uses_a_clock_read_after_the_cooldown_call(chain, tmp_pat
     result = run(s["client"], s["c"], True, tmp_path, tick=boundary - 300, clock=lambda: times.pop(0))
     assert result["status"] == "boundary"
     assert s["client"].eth.get_transaction_count(s["keeper"]) == nonce
+
+
+def execute_batch(s, prepared):
+    for tx in prepared["transactions"]:
+        s["client"].eth.send_transaction(
+            {"from": prepared["meta"]["safeAddress"], "to": tx["to"], "data": tx["data"]}
+        )
+
+
+def test_setup_and_allowance_batches_rerun_over_a_used_allowance(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)  # a sale has consumed part of the allowance
+    vyper, _ = setup(s["client"], s["c"], 400_000 * 10**18)
+    execute_batch(s, vyper)
+    allowance = s["crv"].functions.allowance(s["receiver"], s["escrow"].address).call()
+    assert allowance == 400_000 * 10**18
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(s["c"]))
+    monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
+    monkeypatch.setattr("sys.argv", [
+        "vyper-grant", "--config", str(config), "--out", str(tmp_path), "allowance", "--crv", "1000",
+    ])
+    main()
+    top_up = json.loads((tmp_path / "allowance-vyper.safe.json").read_text())
+    assert top_up["meta"]["allowanceAtRead"] == str(400_000 * 10**18)
+    assert len(top_up["transactions"]) == 2
+    assert "toggle" not in json.dumps(top_up)
+    execute_batch(s, top_up)
+    assert s["crv"].functions.allowance(s["receiver"], s["escrow"].address).call() == 1000 * 10**18
+
+
+def test_toggle_follows_a_fresh_read_and_doctor_flags_an_operating_gap(chain):
+    s = chain
+    s["minter"].functions.toggle_approve_mint(s["escrow"].address).transact({"from": s["receiver"]})
+    vyper, _ = setup(s["client"], s["c"], 10**24)
+    assert vyper["meta"]["mintEnabledAtRead"] is False and len(vyper["transactions"]) == 3
+    assert "problems" not in doctor(s["client"], s["c"])
+    report_ = doctor(s["client"], {**s["c"], "operating": True})
+    assert report_["problems"] == ["Vyper's mint permission is off"]
+    assert report_["creation_check"] == {"funding": "creation transaction", "proceeds": "creation transaction"}
+    execute_batch(s, vyper)
+    assert doctor(s["client"], {**s["c"], "operating": True})["problems"] == []
+
+
+def test_replacement_pauses_and_revokes_every_old_permission(chain):
+    s = chain
+    old = s["escrow"]
+    other = s["client"].eth.accounts[6]
+    old.functions.set_keeper(other, True).transact({"from": s["manager"]})
+    gone = s["client"].eth.accounts[7]
+    old.functions.set_keeper(gone, True).transact({"from": s["manager"]})
+    old.functions.set_keeper(gone, False).transact({"from": s["manager"]})
+    new = s["deploy"]("proceeds")
+    with pytest.raises(ValueError, match="must differ"):
+        setup(s["client"], s["c"], 10**24, new.address, 1)
+    with pytest.raises(ValueError, match="replace-block"):
+        setup(s["client"], s["c"], 10**24, old.address)
+    vyper, manager = setup(s["client"], s["c"], 10**24, old.address, 1)
+    execute_batch(s, manager)
+    execute_batch(s, vyper)
+    assert old.functions.paused().call()
+    assert enabled_keepers(s["client"], old, 1) == []
+    assert s["crv"].functions.allowance(s["receiver"], old.address).call() == 0
+    assert not s["minter"].functions.allowed_to_mint_for(old.address, s["receiver"]).call()
+    assert s["crv"].functions.allowance(s["receiver"], new.address).call() == 10**24
+    assert s["minter"].functions.allowed_to_mint_for(new.address, s["receiver"]).call()
+    assert new.functions.keepers(s["keeper"]).call()
+    # Rerunning after both batches builds no further changes to the old escrow.
+    vyper, manager = setup(s["client"], s["c"], 10**24, old.address, 1)
+    assert len(manager["transactions"]) == 1 and len(vyper["transactions"]) == 3
+
+
+def test_historical_vote_search_is_bounded_and_checked(chain):
+    s = chain
+    s["tester"].time_travel(s["start"] + 100)
+    s["tester"].mine_block()
+    final = s["client"].eth.get_block("finalized")
+    assert historical_vote(s["client"], s["start"], final, 1)["slope"] == 10**12
+    with pytest.raises(ValueError, match="multiple"):
+        historical_vote(s["client"], s["start"] + 1, final, 1)
+    first = next(
+        n for n in range(final["number"] + 1)
+        if s["client"].eth.get_block(n)["timestamp"] >= s["start"]
+    )
+    with pytest.raises(ValueError, match="deployment_block"):
+        historical_vote(s["client"], s["start"], final, first + 50_400)
+
+
+def test_proceeds_deployment_gas_includes_the_weekly_update_once(chain):
+    s = chain
+    for name, extra in [("funding", 0), ("proceeds", 1_000_000)]:
+        tx = deployment(s["client"], {}, name, s["deployer"])["transaction"]
+        estimate = s["client"].eth.estimate_gas(
+            {"from": s["deployer"], "data": artifact(name)["bytecode"]}
+        )
+        assert tx["gas"] == estimate * 12 // 10 + extra
+
+
+def test_creation_transaction_is_checked_where_configured(chain, tmp_path):
+    s = chain
+    verify(s["client"], s["c"])
+    swapped = {**s["c"], "proceeds_tx": s["c"]["funding_tx"]}
+    with pytest.raises(ValueError, match="proceeds creation"):
+        verify(s["client"], swapped, names=("proceeds",))
+    with pytest.raises(ValueError, match="proceeds creation"):
+        run(s["client"], swapped, directory=tmp_path)
+    legacy = {k: v for k, v in s["c"].items() if not k.endswith("_tx")}
+    verify(s["client"], legacy)
+    assert doctor(s["client"], legacy)["creation_check"]["proceeds"] == "runtime only"
+
+
+def test_cli_errors_print_only_owned_messages(chain, tmp_path, monkeypatch, capsys):
+    s = chain
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(s["c"]))
+
+    def leaky():
+        raise ConnectionError("HTTPConnectionPool: Max retries exceeded with url: /v2/SECRETKEY123")
+
+    monkeypatch.setattr("vyper_grant.cli.rpc", leaky)
+    monkeypatch.setattr("sys.argv", ["vyper-grant", "--config", str(config), "doctor"])
+    with pytest.raises(SystemExit):
+        main()
+    err = capsys.readouterr().err
+    assert "SECRETKEY123" not in err and err.strip() == "Error: ConnectionError"

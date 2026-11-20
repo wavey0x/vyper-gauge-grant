@@ -5,6 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 import json
 import os
+import re
 import tempfile
 from web3 import Web3
 
@@ -59,6 +60,9 @@ def load_config(path):
         "sell_vyper",
         "slippage_bps",
         "max_gas_gwei",
+        "funding_tx",
+        "proceeds_tx",
+        "operating",
     }
     if set(c) - allowed:
         raise ValueError(
@@ -82,6 +86,11 @@ def load_config(path):
         raise ValueError("Maximum CRV must be at least the minimum trade")
     if type(c.get("sell_vyper", True)) is not bool:
         raise ValueError("sell_vyper must be a boolean")
+    if type(c.get("operating", False)) is not bool:
+        raise ValueError("operating must be a boolean")
+    for key in ["funding_tx", "proceeds_tx"]:
+        if c.get(key) is not None and not re.fullmatch(r"0x[0-9a-fA-F]{64}", str(c[key])):
+            raise ValueError(key + " must be a transaction hash")
     return c
 
 

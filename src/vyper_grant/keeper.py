@@ -5,6 +5,7 @@ import os
 import time
 from pathlib import Path
 from web3.exceptions import ContractLogicError
+from .chain import verify
 from .core import ADDRESSES, WEEK, address, contract, named, units
 
 TICK = 300  # cron period; ops/run.sh records each launch time in KEEPER_TICK
@@ -182,7 +183,7 @@ def run(
         proceeds = not funding_only
         sale = False
         if funding_only:
-            escrow = contract(client, "funding", c["funding"])
+            (escrow,) = verify(client, c, names=("funding",))
             f = escrow.functions
             t = timing(client, clock)
             skip = funding_window(t)
@@ -198,7 +199,7 @@ def run(
                 "week": f.next_week().call(block_identifier=block),
             }
         else:
-            escrow = contract(client, "proceeds", c["proceeds"])
+            (escrow,) = verify(client, c, names=("proceeds",))
             f = escrow.functions
             t = timing(client, clock)
             block = t["block"]

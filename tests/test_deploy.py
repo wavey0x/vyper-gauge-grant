@@ -157,3 +157,35 @@ def test_explorer_failure_is_not_reported_as_success(monkeypatch):
         deploy.publish("funding", "0x" + "12" * 20, {})
     monkeypatch.setattr(deploy, "etherscan", lambda *a, **k: {"status": "0", "result": "Contract source code already verified"})
     deploy.publish("funding", "0x" + "12" * 20, {})
+
+
+def test_confirmed_failed_deployment_is_replaced_only_on_request(deployment_run):
+    s, args, _, prompts, _ = deployment_run
+    client = s["client"]
+    # A creation transaction that reverts: PUSH1 0 PUSH1 0 REVERT.
+    failed = client.eth.send_transaction({"from": s["deployer"], "data": "0x60006000fd", "gas": 100_000})
+    assert client.eth.get_transaction_receipt(failed).status == 0
+    sources = {"funding": deploy.verification_input("funding")}
+    fingerprint = deploy.Web3.to_hex(deploy.Web3.keccak(text=json.dumps(sources, sort_keys=True)))
+    args.journal.write_text(json.dumps({"build": fingerprint, "funding": {"tx": deploy.Web3.to_hex(failed)}}))
+    args.only, args.broadcast = "funding", True
+    with pytest.raises(ValueError, match="retry-failed"):
+        deploy.execute(args)
+    assert prompts == []
+    args.retry_failed = True
+    deploy.execute(args)
+    journal = json.loads(args.journal.read_text())
+    assert journal["funding"]["failed"] == [deploy.Web3.to_hex(failed)]
+    assert journal["funding"]["tx"] != journal["funding"]["failed"][0]
+    saved = json.loads(args.config.read_text())
+    assert saved["funding"] == journal["funding"]["address"]
+    assert saved["funding_tx"] == journal["funding"]["tx"]
+
+
+def test_deploy_errors_print_only_owned_messages():
+    leak = ConnectionError("HTTPConnectionPool: Max retries exceeded with url: /v2/SECRETKEY123")
+    assert "SECRETKEY123" not in deploy.error_message(leak)
+    assert deploy.error_message(leak).startswith("Error: ConnectionError")
+    owned = ValueError("Selected deployment addresses are required")
+    assert "Selected deployment addresses are required" in deploy.error_message(owned)
+    assert "KEY" not in deploy.error_message(ValueError("see https://rpc.example/v2/KEY"))

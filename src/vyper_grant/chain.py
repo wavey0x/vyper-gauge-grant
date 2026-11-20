@@ -23,7 +23,35 @@ def verify(client, c, block="latest", names=("funding", "proceeds")):
         for getter, value in expected[name].items():
             if instance.functions[getter]().call(block_identifier=block) != value:
                 raise ValueError(f"Unexpected {name} {getter}")
+        if c.get(name + "_tx"):
+            verify_creation(client, name, instance, c[name + "_tx"])
     return tuple(contracts[n] for n in names)
+
+
+def verify_creation(client, name, instance, tx_hash, arguments=b""):
+    """Matching runtime alone allows custom initcode that presets storage; check the creation."""
+    tx = client.eth.get_transaction(tx_hash)
+    receipt = client.eth.get_transaction_receipt(tx_hash)
+    expected = bytes.fromhex(artifact(name)["bytecode"][2:]) + arguments
+    if (
+        tx.get("to")
+        or receipt["status"] != 1
+        or receipt["contractAddress"] != instance.address
+        or bytes(tx["input"]) != expected
+    ):
+        raise ValueError(f"Unexpected {name} creation transaction")
+    if name == "proceeds":
+        week = client.eth.get_block(receipt["blockNumber"])["timestamp"] // WEEK * WEEK
+        if instance.functions.DEPLOYED_WEEK().call() != week:
+            raise ValueError("Unexpected proceeds DEPLOYED_WEEK")
+
+
+def enabled_keepers(client, escrow, start):
+    """Replay KeeperSet in log order, then confirm each remaining account on chain."""
+    enabled = {}
+    for event in logs(client, escrow.events.KeeperSet(), start, client.eth.block_number):
+        enabled[event["args"]["account"]] = event["args"]["enabled"]
+    return [a for a, on in enabled.items() if on and escrow.functions.keepers(a).call()]
 
 
 def logs(client, event, start, end):
@@ -34,11 +62,16 @@ def logs(client, event, start, end):
     ]
 
 
-def historical_vote(client, week, final):
+def historical_vote(client, week, final, start_block=None):
     """Read just BEFORE the boundary block; a boundary-block revote is for next week."""
+    if week % WEEK:
+        raise ValueError("Week must be a multiple of 604800")
     if week > final["timestamp"]:
         raise ValueError("Boundary is not finalized")
-    low, high = 0, final["number"]
+    # A week has at most 50,400 blocks, so a week before deployment brackets any valid week.
+    low, high = (max(start_block - 50_400, 0) if start_block is not None else 0), final["number"]
+    if low and client.eth.get_block(low)["timestamp"] >= week:
+        raise ValueError("Search start is not before the week; check deployment_block")
     while low < high:
         middle = (low + high) // 2
         if client.eth.get_block(middle)["timestamp"] < week:
@@ -68,7 +101,8 @@ def report(client, c):
     block = final["number"]
     if c.get("deployment_block") is None or not 0 <= c["deployment_block"] <= block:
         raise ValueError("A finalized deployment_block is required")
-    funding, proceeds = [contract(client, n, c[n]) for n in ["funding", "proceeds"]]
+    funding, proceeds = verify(client, c)
+
     def read(fn):
         return fn.call(block_identifier=block)
 
