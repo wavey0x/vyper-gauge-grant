@@ -1,11 +1,14 @@
 {
   "funding": "0x3602642D28fA686ff74d4C85aF5B6fBe8722CCD8",
   "proceeds": "0x38cf14DaC1329ff404739379004909c6847ab3aC",
+  "funding_tx": "0x43040239602b2f8f9477f34f2bf4a2036c21850683a90a07ebf6f57630fe9658",
+  "proceeds_tx": "0x93060472fe1b36cebe85c954b2f0d180fc4bbfc28e58cc9cc99af3bf5d0e840c",
   "deployment_block": 26451282,
   "keeper": null,
   "min_trade_crv": "100",
   "max_crv": "15000",
   "sell_vyper": true,
   "slippage_bps": 50,
-  "max_gas_gwei": "20"
+  "max_gas_gwei": "20",
+  "operating": false
 }
