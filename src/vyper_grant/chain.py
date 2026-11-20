@@ -1,7 +1,8 @@
 """Deployment verification, historical recovery, and finalized event reports."""
 
+from eth_abi import encode
 from web3 import Web3
-from .core import ADDRESSES, WEEK, artifact, contract, named
+from .core import ADDRESSES, WEEK, address, artifact, contract, named
 
 
 def verify(client, c, block="latest", names=("funding", "proceeds")):
@@ -14,6 +15,12 @@ def verify(client, c, block="latest", names=("funding", "proceeds")):
         expected["proceeds"] = {
             "RECEIVER": ADDRESSES["receiver"],
         }
+    arguments = {}
+    if "guard" in names:
+        if c.get("proceeds") is None or c.get("keeper") is None:
+            raise ValueError("The guard needs proceeds and keeper configured")
+        expected["guard"] = {"ESCROW": address(c["proceeds"]), "BOT": address(c["keeper"])}
+        arguments["guard"] = encode(["address", "address"], list(expected["guard"].values()))
     for name, instance in contracts.items():
         code = bytes(client.eth.get_code(instance.address, block_identifier=block))
         runtime = bytes.fromhex(artifact(name)["bytecode_runtime"][2:])
@@ -24,7 +31,7 @@ def verify(client, c, block="latest", names=("funding", "proceeds")):
             if instance.functions[getter]().call(block_identifier=block) != value:
                 raise ValueError(f"Unexpected {name} {getter}")
         if c.get(name + "_tx"):
-            verify_creation(client, name, instance, c[name + "_tx"])
+            verify_creation(client, name, instance, c[name + "_tx"], arguments.get(name, b""))
     return tuple(contracts[n] for n in names)
 
 

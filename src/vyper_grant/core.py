@@ -28,8 +28,10 @@ ADDRESSES = {
     "minter": "0xd061D61a4d941c39E5453435B6345Dc261C2fcE0",
     "pool": "0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14",
     "stable_pool": "0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E",
+    "feed": "0xCd627aA160A6fA45Eb793D19Ef54f5062F20f33f",
 }
-CONTRACTS = {"funding": "FundingEscrow", "proceeds": "ProceedsEscrow"}
+CONTRACTS = {"funding": "FundingEscrow", "proceeds": "ProceedsEscrow", "guard": "KeeperGuard"}
+ESCROWS = ("funding", "proceeds")  # deployed by default; the optional guard takes arguments
 
 
 SECRET_ENV = ("ETHEREUM_RPC_URL", "MAINNET_RPC_URL", "ETHERSCAN_KEY")
@@ -81,13 +83,15 @@ def load_config(path):
         "funding_tx",
         "proceeds_tx",
         "operating",
+        "guard",
+        "guard_tx",
     }
     if set(c) - allowed:
         raise ValueError(
             "Unknown or obsolete configuration fields: "
             + ", ".join(sorted(set(c) - allowed))
         )
-    for key in ["funding", "proceeds", "keeper"]:
+    for key in ["funding", "proceeds", "keeper", "guard"]:
         if c.get(key):
             c[key] = address(c[key])
     for key in [
@@ -106,7 +110,7 @@ def load_config(path):
         raise ValueError("sell_vyper must be a boolean")
     if type(c.get("operating", False)) is not bool:
         raise ValueError("operating must be a boolean")
-    for key in ["funding_tx", "proceeds_tx"]:
+    for key in ["funding_tx", "proceeds_tx", "guard_tx"]:
         if c.get(key) is not None and not re.fullmatch(r"0x[0-9a-fA-F]{64}", str(c[key])):
             raise ValueError(key + " must be a transaction hash")
     return c

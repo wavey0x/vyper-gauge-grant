@@ -86,7 +86,7 @@ def chain(monkeypatch):
             address=receipt.contractAddress, abi=artifact(name)["abi"]
         )
 
-    usdc, crv, crvusd, vault, gauge, controller, minter, pool, stable_pool = [
+    usdc, crv, crvusd, vault, gauge, controller, minter, pool, stable_pool, feed = [
         client.eth.contract(address=str(mock.address), abi=mock.abi)
         for mock in mocks.values()
     ]
@@ -1042,3 +1042,47 @@ def test_doctor_verifies_proceeds_without_a_keeper(chain):
     assert status["keeper_enabled"] is False
     with pytest.raises(ValueError, match="proceeds creation"):
         doctor(s["client"], {**s["c"], "keeper": None, "proceeds_tx": s["c"]["funding_tx"]})
+
+
+def deploy_guard(s):
+    prepared = deployment(s["client"], s["c"], "guard", s["deployer"])
+    receipt = s["client"].eth.wait_for_transaction_receipt(
+        s["client"].eth.send_transaction(prepared["transaction"])
+    )
+    s["c"].update(guard=receipt.contractAddress, guard_tx=Web3.to_hex(receipt.transactionHash))
+    return s["client"].eth.contract(address=receipt.contractAddress, abi=artifact("guard")["abi"])
+
+
+def test_keeper_sells_through_the_guard_after_setup(chain, tmp_path):
+    s = chain
+    begin(s)
+    guard = deploy_guard(s)
+    verify(s["client"], s["c"], names=("guard",))
+    _, manager = setup(s["client"], s["c"], 10**24)
+    calls = [s["escrow"].decode_function_input(t["data"])[1] for t in manager["transactions"]]
+    assert calls == [
+        {"account": guard.address, "enabled": True},
+        {"account": s["keeper"], "enabled": False},
+    ]
+    execute_batch(s, manager)
+    status = doctor(s["client"], {**s["c"], "operating": True})
+    assert status["guard_enabled"] and not status["keeper_enabled"] and status["problems"] == []
+    s["tester"].time_travel(s["client"].eth.get_block("latest").timestamp + 600)
+    s["tester"].mine_block()
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "sale" and result["to"] == guard.address
+    function, arguments = guard.decode_function_input(result["data"])
+    assert function.fn_name == "work" and arguments["max_crv"] == int(result["crv"])
+    assert s["client"].eth.get_transaction_receipt(submit(s, result)).status == 1
+
+
+def test_guard_needs_sell_mode_and_matching_creation(chain, tmp_path):
+    s = chain
+    deploy_guard(s)
+    s["escrow"].functions.set_keeper(s["c"]["guard"], True).transact({"from": s["manager"]})
+    with pytest.raises(ValueError, match="sell_vyper"):
+        run(s["client"], {**s["c"], "sell_vyper": False}, directory=tmp_path)
+    with pytest.raises(ValueError, match="guard BOT"):
+        verify(s["client"], {**s["c"], "keeper": s["payee"]}, names=("guard",))
+    with pytest.raises(ValueError, match="guard creation"):
+        verify(s["client"], {**s["c"], "guard_tx": s["c"]["proceeds_tx"]}, names=("guard",))

@@ -44,14 +44,15 @@ def batch(sender, *calls, **meta):
 def deployment(client, c, name, deployer):
     compiled = artifact(name)
     factory = client.eth.contract(abi=compiled["abi"], bytecode=compiled["bytecode"])
-    tx = factory.constructor().build_transaction(
+    arguments = [address(c.get("proceeds")), address(c.get("keeper"))] if name == "guard" else []
+    tx = factory.constructor(*arguments).build_transaction(
         {"from": address(deployer), "chainId": 1}
     )
     # The single gas rule for signed, unsigned and cost-estimate paths.
     tx["gas"] = tx["gas"] * 12 // 10 + (PROCEEDS_GAS if name == "proceeds" else 0)
     return {
         "contract": CONTRACTS[name],
-        "constructor_arguments": [],
+        "constructor_arguments": arguments,
         "transaction": tx,
     }
 
@@ -88,7 +89,17 @@ def setup(client, c, allowance, replace=None, replace_block=None):
     mint = m.allowed_to_mint_for(escrow.address, A["receiver"]).call(block_identifier=block)
     if not mint:
         vyper.append(m.toggle_approve_mint(escrow.address))
-    manager.append(escrow.functions.set_keeper(address(c["keeper"]), True))
+    if c.get("guard"):
+        # The guard must be the only keeper, so the bot cannot bypass its price floor.
+        (guard,) = verify(client, c, names=("guard",))
+        if c.get("deployment_block") is None:
+            raise ValueError("deployment_block is required to find existing keepers")
+        manager.append(escrow.functions.set_keeper(guard.address, True))
+        for account in enabled_keepers(client, escrow, c["deployment_block"]):
+            if account != guard.address:
+                manager.append(escrow.functions.set_keeper(account, False))
+    else:
+        manager.append(escrow.functions.set_keeper(address(c["keeper"]), True))
     meta = {"readBlock": block, "mintEnabledAtRead": mint}
     if replace:
         meta.update(replacing=old.address, oldMintEnabledAtRead=old_mint)
@@ -139,13 +150,22 @@ def doctor(client, c):
                 .call()
             ),
         )
+        guarded = bool(c.get("guard"))
+        if guarded:
+            (g,) = verify(client, c, names=("guard",))
+            result["guard_enabled"] = p.functions.keepers(g.address).call()
         if c.get("operating"):
             result["problems"] = [
                 text
                 for failed, text in [
                     (not result["mint_enabled"], "Vyper's mint permission is off"),
                     (result["crv_allowance"] == "0", "Vyper's CRV allowance is zero"),
-                    (not result["keeper_enabled"], "The keeper is not enabled"),
+                    (
+                        not result["guard_enabled" if guarded else "keeper_enabled"],
+                        "The guard is not enabled" if guarded else "The keeper is not enabled",
+                    ),
+                    (guarded and result["keeper_enabled"], "The bot is still a direct keeper"),
+                    (guarded and not c.get("sell_vyper", True), "The guard requires sell_vyper"),
                 ]
                 if failed
             ]
@@ -219,7 +239,7 @@ def main():
         if args.command == "build":
             for name, compiled in build().items():
                 atomic_json(out / (name + ".json"), compiled)
-            print("Built both Vyper contracts")
+            print("Built the Vyper contracts")
             return
         if args.command == "report" and args.input:
             render(json.loads(Path(args.input).read_text()), out)

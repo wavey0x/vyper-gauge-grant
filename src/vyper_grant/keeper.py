@@ -216,9 +216,15 @@ def run(
                 skip, closing, may_sell = proceeds_window(t, tick, cooldown)
             if skip:
                 return {"status": skip}
+            guard = None
+            if c.get("guard"):
+                # verify checks the guard's escrow and that its BOT is this signer.
+                (guard,) = verify(client, c, names=("guard",))
+                if not c.get("sell_vyper", True):
+                    raise ValueError("The guard only sells; set sell_vyper to true")
             paused = read(f.paused())
             can_work = read(f.canWork())
-            authorized = read(f.keepers(sender))
+            authorized = read(f.keepers(guard.address if guard else sender))
             fn = f.checkpoint()
             action = {"status": "checkpoint"}
             if checkpoint_only:
@@ -256,7 +262,11 @@ def run(
                 if skipped:
                     action.update(sale=skipped, **state)
                 else:
-                    fn = f.work(minimum, amount, q["sell_vyper"])
+                    fn = (
+                        guard.functions.work(minimum, amount)
+                        if guard
+                        else f.work(minimum, amount, q["sell_vyper"])
+                    )
                     sale = True
                     action = {
                         "status": "sale" if swap else "retain",
@@ -277,7 +287,7 @@ def run(
                     if not send:
                         return {
                             **action,
-                            "to": escrow.address,
+                            "to": fn.address,
                             "data": fn._encode_transaction_data(),
                             "dry_run": True,
                         }

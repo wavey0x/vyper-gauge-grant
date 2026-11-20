@@ -8,7 +8,7 @@ from eth_account import Account
 
 from test_operations import chain  # Reuse the fixed-address mainnet-dependency fixture.
 from vyper_grant import deploy
-from vyper_grant.core import CONTRACTS, ROOT
+from vyper_grant.core import CONTRACTS, ESCROWS, ROOT
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def test_dry_run_then_deploy_verify_and_resume_without_duplicates(deployment_run
     assert len(prompts) == 1 and len(published) == 2
     assert saved["deployment_block"] == journal["funding"]["block"]
     assert saved["keeper"] is None  # Deployment does not authorize the signer as keeper.
-    for name in CONTRACTS:
+    for name in ESCROWS:
         assert saved[name] == journal[name]["address"]
         assert s["client"].eth.get_code(saved[name])
     deploy.execute(args)
@@ -206,3 +206,16 @@ def test_config_hash_must_match_the_journal(deployment_run):
     args.config.write_text(json.dumps(saved))
     with pytest.raises(ValueError, match="differs from the journal"):
         deploy.execute(args)
+
+
+def test_guard_deploys_with_its_arguments_without_moving_the_report_start(deployment_run):
+    s, args, _, prompts, published = deployment_run
+    config = json.loads((ROOT / "config/example.json").read_text())
+    config.update(proceeds=s["escrow"].address, keeper=s["keeper"], deployment_block=1)
+    args.config.write_text(json.dumps(config))
+    args.only, args.broadcast = "guard", True
+    deploy.execute(args)
+    saved = json.loads(args.config.read_text())
+    assert saved["guard"] and saved["guard_tx"] and saved["deployment_block"] == 1
+    assert published[0][0] == "guard" and published[0][3] == deploy.encoded_arguments(saved, "guard")
+    assert len(published[0][3]) == 128

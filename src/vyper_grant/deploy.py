@@ -14,7 +14,7 @@ from web3.exceptions import TransactionNotFound
 
 from .chain import verify
 from .cli import deployment
-from .core import CONTRACTS, ROOT, address, artifact, atomic_json, load_config, printable, rpc
+from .core import CONTRACTS, ESCROWS, ROOT, address, artifact, atomic_json, load_config, printable, rpc
 
 
 def verification_input(name):
@@ -58,7 +58,16 @@ def etherscan(action, **fields):
     return response.json()
 
 
-def publish(name, deployed, source):
+def encoded_arguments(c, name):
+    """Explorer verification needs the guard's ABI-encoded constructor arguments."""
+    if name != "guard":
+        return ""
+    from eth_abi import encode
+
+    return encode(["address", "address"], [address(c["proceeds"]), address(c["keeper"])]).hex()
+
+
+def publish(name, deployed, source, arguments=""):
     for _ in range(12):
         result = etherscan(
             "verifysourcecode",
@@ -68,7 +77,7 @@ def publish(name, deployed, source):
             contractname=f"contracts/{CONTRACTS[name]}.vy:{CONTRACTS[name]}",
             compilerversion="vyper:0.4.3",
             optimizationUsed="1",
-            constructorArguments="",
+            constructorArguments=arguments,
         )
         if "unable to locate contractcode" not in str(result.get("result", "")).lower():
             break
@@ -89,13 +98,13 @@ def publish(name, deployed, source):
     raise ValueError(f"Etherscan still processing {name}; retry with --verify-only")
 
 
-def deploy_contract(client, name, account, record, journal):
+def deploy_contract(client, name, account, record, journal, c=None):
     """Record the signed transaction hash before sending; never silently redeploy."""
     if "tx" not in record:
         nonce = client.eth.get_transaction_count(account.address)
         if client.eth.get_transaction_count(account.address, "pending") != nonce:
             raise ValueError("Account has a pending transaction; resolve it before deploying")
-        tx = deployment(client, {}, name, account.address)["transaction"]
+        tx = deployment(client, c or {}, name, account.address)["transaction"]
         tx.update(nonce=nonce)
         signed = account.sign_transaction(tx)
         record["tx"] = Web3.to_hex(signed.hash)
@@ -106,7 +115,7 @@ def deploy_contract(client, name, account, record, journal):
     if receipt.status != 1 or not receipt.contractAddress:
         raise ValueError(f"{name} deployment {record['tx']} reverted; inspect it, then rerun with --retry-failed")
     deployed = receipt.contractAddress
-    verify(client, {name: deployed, name + "_tx": record["tx"]}, names=(name,))
+    verify(client, {**(c or {}), name: deployed, name + "_tx": record["tx"]}, names=(name,))
     record.update(address=deployed, block=receipt.blockNumber)
     atomic_json(journal[0], journal[1])
     return deployed
@@ -164,7 +173,7 @@ def resolve_failed(client, args, state, names):
 
 def execute(args):
     client = rpc()
-    names = (args.only,) if args.only else tuple(CONTRACTS)
+    names = (args.only,) if args.only else ESCROWS
     sources = {name: verification_input(name) for name in names}
     c = load_config(args.config if args.config.exists() else ROOT / "config/example.json")
     state = json.loads(args.journal.read_text()) if args.journal.exists() else {}
@@ -201,7 +210,8 @@ def execute(args):
             tx = deployment(client, c, name, sender)["transaction"]
             gas = tx["gas"]
             cost += gas * tx.get("maxFeePerGas", tx.get("gasPrice", 0))
-            print(f"{CONTRACTS[name]}: {gas:,} gas limit · no constructor arguments")
+            arguments = encoded_arguments(c, name)
+            print(f"{CONTRACTS[name]}: {gas:,} gas limit · constructor arguments: {arguments or 'none'}")
         print(f"Maximum estimated deployment gas cost: {Web3.from_wei(cost, 'ether')} ETH")
         if client.eth.get_balance(sender) < cost:
             raise ValueError("Insufficient ETH for estimated deployment gas")
@@ -220,11 +230,12 @@ def execute(args):
                 raise ValueError("Keystore address does not match its signing key")
         for name in names:
             c[name] = deploy_contract(
-                client, name, account, state[name], (args.journal, state)
+                client, name, account, state[name], (args.journal, state), c
             )
             c[name + "_tx"] = state[name]["tx"]
+            # The report starts from the escrows' deployment; the guard doesn't move it.
             c["deployment_block"] = min(
-                [state[n]["block"] for n in names if state[n].get("block")]
+                [state[n]["block"] for n in names if n in ESCROWS and state[n].get("block")]
                 + ([c["deployment_block"]] if c.get("deployment_block") is not None else [])
             )
             atomic_json(args.config, c)
@@ -234,9 +245,9 @@ def execute(args):
         raise ValueError("ETHERSCAN_KEY is required")
     for name in names:
         deployed = state[name]["address"]
-        verify(client, {name: deployed, name + "_tx": state[name]["tx"]}, names=(name,))
+        verify(client, {**c, name: deployed, name + "_tx": state[name]["tx"]}, names=(name,))
         print(f"Verifying {CONTRACTS[name]}…", flush=True)
-        publish(name, deployed, sources[name])
+        publish(name, deployed, sources[name], encoded_arguments(c, name))
         print(f"Verified: https://etherscan.io/address/{deployed}#code", flush=True)
     print(f"Saved {args.config}. Next: configure keeper and prepare the two Safe setup batches.")
 
