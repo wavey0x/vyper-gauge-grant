@@ -6,10 +6,13 @@ import pytest
 from eth_tester import EthereumTester, PyEVMBackend
 from eth.vm.spoof import SpoofTransaction
 from web3 import Web3, EthereumTesterProvider
+from web3.exceptions import ContractLogicError
 from conftest import deploy_mocks
 from vyper_grant.core import ADDRESSES, ROOT, WEEK, artifact
 from vyper_grant.chain import verify, report, historical_vote
+from vyper_grant.chain import enabled_keepers
 from vyper_grant.cli import setup, doctor, deployment, main
+from vyper_grant import keeper as keeper_module
 from vyper_grant.keeper import run
 
 
@@ -47,6 +50,12 @@ def chain(monkeypatch):
     tester = EthereumTester(backend)
     client = Web3(EthereumTesterProvider(tester))
     monkeypatch.setattr(type(client.eth), "chain_id", property(lambda _: 1))
+    # The keeper's wall clock follows the test chain; runs are unscheduled unless a tick is given.
+    monkeypatch.setattr(
+        "vyper_grant.keeper.wall_clock",
+        lambda: client.eth.get_block("latest").timestamp + 1,
+    )
+    monkeypatch.delenv("KEEPER_TICK", raising=False)
     deployer, keeper, payee = [client.eth.accounts[i] for i in [0, 4, 5]]
     client.eth.default_account = deployer
     original_sign = backend._get_normalized_and_signed_evm_transaction
@@ -72,6 +81,7 @@ def chain(monkeypatch):
             client.eth.send_transaction(prepared["transaction"])
         )
         c[name] = receipt.contractAddress
+        c[name + "_tx"] = Web3.to_hex(receipt.transactionHash)
         return client.eth.contract(
             address=receipt.contractAddress, abi=artifact(name)["abi"]
         )
@@ -131,7 +141,8 @@ def test_verified_contracts_and_idempotent_setup(chain):
     prepared = deployment(s["client"], {}, "funding", s["deployer"])
     assert prepared["constructor_arguments"] == []
     vyper, manager = setup(s["client"], {**s["c"], "funding": None}, 10**25)
-    assert len(vyper["transactions"]) == len(manager["transactions"]) == 1
+    assert len(vyper["transactions"]) == 2 and len(manager["transactions"]) == 1
+    assert vyper["meta"]["mintEnabledAtRead"] is True
     assert doctor(s["client"], s["c"])["mint_enabled"]
     assert doctor(s["client"], {**s["c"], "funding": None})["mint_enabled"]
     assert s["escrow"].functions.DEPLOYED_WEEK().call() == s["start"] - WEEK
@@ -248,10 +259,10 @@ def test_keeper_can_retain_entire_batch_with_zero_yearn_share(chain, tmp_path):
     s = chain
     s["c"].update(sell_vyper=False, max_crv="100", min_trade_crv="50")
     s["crv"].functions.mint(s["receiver"], 100 * 10**18).transact()
-    s["tester"].time_travel(s["start"] - 180)
+    s["tester"].time_travel(s["start"] - 300)
     s["tester"].mine_block()
-    result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "retain"
+    result = run(s["client"], s["c"], directory=tmp_path, tick=s["start"] - 300)
+    assert result["status"] == "retain" and result["closing"]
     assert result["swap_crv"] == result["min_usdc"] == "0"
     assert result["vyper_crv"] == result["crv"] == str(100 * 10**18)
     submit(s, result)
@@ -474,16 +485,21 @@ def test_closing_sale_bypasses_minimum_but_respects_cap(chain, tmp_path):
     begin(s)
     submit(s, run(s["client"], s["c"], directory=tmp_path))
     s["c"]["min_trade_crv"] = "1000000"
-    s["tester"].time_travel(s["start"] + WEEK - 600)
+    boundary = s["start"] + WEEK
+    s["tester"].time_travel(boundary - 600)
     s["tester"].mine_block()
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "below minimum"
-    s["tester"].time_travel(s["start"] + WEEK - 180)
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "hold"
+    s["tester"].time_travel(boundary - 300)
     s["tester"].mine_block()
-    result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "sale" and int(result["crv"]) > 1000 * 10**18
+    # An unscheduled run never gets the closing waiver.
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "hold"
+    result = run(s["client"], s["c"], directory=tmp_path, tick=boundary - 300)
+    assert result["status"] == "sale" and result["closing"]
+    assert int(result["crv"]) > 1000 * 10**18
     tx = submit(s, result)
     receipt = s["client"].eth.get_transaction_receipt(tx)
     assert receipt.status == 1
+    assert s["client"].eth.get_block(receipt.blockNumber).timestamp < boundary
     sold = s["escrow"].events.Sold().get_logs(from_block=receipt.blockNumber, to_block=receipt.blockNumber)[0]["args"]["crv"]
     assert sold == int(result["crv"]) <= int(s["c"]["max_crv"]) * 10**18
     assert s["crv"].functions.balanceOf(s["receiver"]).call() > 0
@@ -534,6 +550,8 @@ def test_boundary_checkpoint_during_cooldown_does_not_bypass_next_week_minimum(c
 
 
 def test_prepared_keeper_sale_can_land_in_next_week(chain, tmp_path):
+    # The contract has no week argument. Only the keeper's pre-signing recheck stops a
+    # sale prepared before the boundary from being sent after it.
     s = chain
     begin(s)
     s["escrow"].functions.checkpoint().transact()
@@ -541,9 +559,9 @@ def test_prepared_keeper_sale_can_land_in_next_week(chain, tmp_path):
         s["voter"], 2 * 10**12, s["start"] + 52 * WEEK, s["start"] + 40000
     ).transact()
     boundary = s["start"] + WEEK
-    s["tester"].time_travel(boundary - 180)
+    s["tester"].time_travel(boundary - 300)
     s["tester"].mine_block()
-    prepared = run(s["client"], s["c"], directory=tmp_path)
+    prepared = run(s["client"], s["c"], directory=tmp_path, tick=boundary - 300)
     assert prepared["status"] == "sale"
     s["tester"].time_travel(boundary + 60)
     receipt = s["client"].eth.get_transaction_receipt(submit(s, prepared))
@@ -592,3 +610,435 @@ def test_pending_nonce_prevents_another_submission(chain, tmp_path, monkeypatch)
         ),
     )
     assert run(s["client"], s["c"], True, tmp_path)["status"] == "pending nonce"
+
+
+def set_allowance(s, amount):
+    crv = s["crv"].functions
+    crv.approve(s["escrow"].address, 0).transact({"from": s["receiver"]})
+    crv.approve(s["escrow"].address, amount).transact({"from": s["receiver"]})
+
+
+def selector(fn):
+    return fn._encode_transaction_data()[:10]
+
+
+def called(tx):
+    data = tx["data"]
+    return (data if isinstance(data, str) else Web3.to_hex(data))[:10].lower()
+
+
+def fail_calls(s, monkeypatch, *fns, error=None):
+    """Make eth_call revert for the given contract functions, as a broken pool or state would."""
+    original = s["client"].eth.call
+    blocked = {selector(fn) for fn in fns}
+
+    def call(tx, *args, **kwargs):
+        if called(tx) in blocked:
+            raise error or ContractLogicError("execution reverted: pool")
+        return original(tx, *args, **kwargs)
+
+    monkeypatch.setattr(s["client"].eth, "call", call)
+
+
+def test_allowance_caps_sales_and_exhaustion_is_reported(chain, tmp_path):
+    s = chain
+    begin(s)
+    s["c"].update(min_trade_crv="10")
+    set_allowance(s, 50 * 10**18)
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "sale" and result["crv"] == str(50 * 10**18)
+    assert result["allowance"] == str(50 * 10**18) and result["mint_enabled"]
+    assert s["client"].eth.get_transaction_receipt(submit(s, result)).status == 1
+    s["tester"].time_travel(s["client"].eth.get_block("latest").timestamp + 600)
+    s["tester"].mine_block()
+    assert run(s["client"], s["c"], directory=tmp_path) == {
+        "status": "allowance exhausted", "allowance": "0", "mint_enabled": True,
+    }
+    # A positive allowance below the minimum still funds the closing sale.
+    set_allowance(s, 5 * 10**18)
+    boundary = s["start"] + WEEK
+    s["tester"].time_travel(boundary - 300)
+    s["tester"].mine_block()
+    closing = run(s["client"], s["c"], directory=tmp_path, tick=boundary - 300)
+    assert closing["status"] == "sale" and closing["crv"] == str(5 * 10**18)
+
+
+def test_mint_off_sizes_on_safe_balance_without_claimable(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)
+    s["c"].update(min_trade_crv="10")
+    s["minter"].functions.toggle_approve_mint(s["escrow"].address).transact({"from": s["receiver"]})
+    s["crv"].functions.mint(s["receiver"], 30 * 10**18).transact()
+    balance = s["crv"].functions.balanceOf(s["receiver"]).call()
+    assert s["escrow"].functions.claimable().call() > balance
+    calls = []
+    original = s["client"].eth.call
+    monkeypatch.setattr(
+        s["client"].eth, "call",
+        lambda tx, *a, **k: calls.append(called(tx)) or original(tx, *a, **k),
+    )
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert selector(s["escrow"].functions.claimable()) not in calls
+    assert result["status"] == "sale" and result["crv"] == str(balance)
+    assert result["mint_enabled"] is False
+    assert s["client"].eth.get_transaction_receipt(submit(s, result)).status == 1
+
+
+@pytest.mark.parametrize("amount, raw_quote", [(8 * 10**11, None), (10**12, 0), (4 * 10**12, 1)])
+def test_dust_skips_the_sale_but_records_a_due_snapshot(chain, tmp_path, amount, raw_quote):
+    s = chain
+    begin(s)
+    if raw_quote is not None:
+        assert s["escrow"].functions.quote(amount).call() == raw_quote
+    set_allowance(s, amount)
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "checkpoint" and result["sale"] == "dust"
+    submit(s, result)
+    assert s["escrow"].functions.weeks(s["start"]).call()[0]
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "dust"
+
+
+def test_quote_revert_falls_back_to_checkpoint_and_cli_exits_3(chain, tmp_path, monkeypatch, capsys):
+    s = chain
+    begin(s)
+    fail_calls(s, monkeypatch, s["escrow"].functions.quote(0))
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "simulation failed" and result["step"] == "quote"
+    assert result["reason"] == "contract revert"
+    assert result["fallback"] == "checkpoint"
+    assert result["data"] == s["escrow"].functions.checkpoint()._encode_transaction_data()
+    submit(s, result)
+    assert s["escrow"].functions.weeks(s["start"]).call()[0]
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(s["c"]))
+    monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
+    monkeypatch.setattr("sys.argv", ["vyper-grant", "--config", str(config), "--out", str(tmp_path), "keeper"])
+    with pytest.raises(SystemExit) as exit:
+        main()
+    assert exit.value.code == 3
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["status"] == "simulation failed" and "fallback" not in printed
+
+
+def test_failed_sale_and_failed_fallback_report_checkpoint_failed(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)
+    f = s["escrow"].functions
+    fail_calls(s, monkeypatch, f.work(0, 0, True), f.checkpoint())
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "checkpoint failed" and result["step"] == "simulate"
+    assert result["fallback_reason"] == "contract revert"
+
+
+def test_transport_errors_are_not_treated_as_reverts(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)
+    fail_calls(s, monkeypatch, s["escrow"].functions.quote(0), error=ConnectionError("rpc down"))
+    with pytest.raises(ConnectionError):
+        run(s["client"], s["c"], directory=tmp_path)
+
+
+def test_hold_before_the_close_still_records_a_due_snapshot(chain, tmp_path):
+    s = chain
+    boundary = s["start"] + WEEK
+    s["tester"].time_travel(boundary - 600)
+    s["tester"].mine_block()
+    result = run(s["client"], s["c"], directory=tmp_path)
+    assert result["status"] == "checkpoint" and result["sale"] == "hold"
+    submit(s, result)
+    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "hold"
+
+
+def test_send_rechecks_the_week_after_estimation(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)
+    monkeypatch.setenv("KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex())
+    boundary = s["start"] + WEEK
+    s["tester"].time_travel(boundary - 300)
+    s["tester"].mine_block()
+    times = [boundary - 299]
+    monkeypatch.setattr("vyper_grant.keeper.wall_clock", lambda: times.pop(0) if times else boundary + 1)
+    nonce = s["client"].eth.get_transaction_count(s["keeper"])
+    assert run(s["client"], s["c"], True, tmp_path, tick=boundary - 300)["status"] == "boundary"
+    assert s["client"].eth.get_transaction_count(s["keeper"]) == nonce
+
+
+def test_closing_send_adds_boundary_gas_and_checks_balance(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)
+    monkeypatch.setenv("KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex())
+    boundary = s["start"] + WEEK
+    s["tester"].time_travel(boundary - 300)
+    s["tester"].mine_block()
+    original = s["client"].eth.get_balance
+    monkeypatch.setattr(s["client"].eth, "get_balance", lambda account, *a: 0)
+    assert run(s["client"], s["c"], True, tmp_path, tick=boundary - 300)["status"] == "low balance"
+    monkeypatch.setattr(s["client"].eth, "get_balance", original)
+    sent = run(s["client"], s["c"], True, tmp_path, tick=boundary - 300)
+    tx = s["client"].eth.get_transaction(sent["tx"])
+    receipt = s["client"].eth.get_transaction_receipt(sent["tx"])
+    assert receipt.status == 1 and tx["gas"] > receipt.gasUsed + 1_000_000
+
+
+def head_at(s, timestamp):
+    s["tester"].time_travel(timestamp)
+    s["tester"].mine_block()
+    assert s["client"].eth.get_block("latest").timestamp == timestamp
+
+
+def test_funding_stays_off_the_nonce_until_the_new_week(chain, tmp_path):
+    s = chain
+    s["funding"].functions.fund_round(20 * 10**6).transact({"from": s["manager"]})
+    boundary = s["start"] + WEEK
+    c = {**s["c"], "proceeds": None}
+    for head, clock in [(boundary - 601, boundary - 600), (boundary - 301, boundary - 300), (boundary - 1, boundary + 1)]:
+        head_at(s, head)
+        # The first instalment is overdue, so only the window keeps funding quiet.
+        assert s["funding"].functions.canWork().call()
+        status = run(s["client"], c, directory=tmp_path, funding_only=True, clock=lambda: clock)
+        assert status["status"] == "closing window"
+    head_at(s, boundary + 11)
+    assert run(s["client"], c, directory=tmp_path, funding_only=True)["status"] == "funding payment"
+
+
+@pytest.mark.parametrize("cooldown", [600, 1200])
+def test_close_then_new_week_checkpoint_then_first_sale(chain, tmp_path, cooldown):
+    s = chain
+    begin(s)
+    s["escrow"].functions.set_cooldown(cooldown).transact({"from": s["manager"]})
+    boundary = s["start"] + WEEK
+    head_at(s, boundary - 301)
+    close = run(s["client"], s["c"], directory=tmp_path, tick=boundary - 300)
+    assert close["status"] == "sale" and close["closing"]
+    receipt = s["client"].eth.get_transaction_receipt(submit(s, close))
+    assert s["client"].eth.get_block(receipt.blockNumber).timestamp < boundary
+    s["crv"].functions.mint(s["receiver"], 1000 * 10**18).transact()
+    head_at(s, boundary + 299)
+    first = run(s["client"], s["c"], directory=tmp_path, tick=boundary + 300)
+    assert first["status"] == "checkpoint"
+    submit(s, first)
+    assert s["escrow"].functions.weeks(boundary).call()[0]
+    first_sale = boundary + (600 if cooldown == 600 else 1200)
+    for tick in range(boundary + 600, first_sale + 1, 300):
+        head_at(s, tick - 1)
+        status = run(s["client"], s["c"], directory=tmp_path, tick=tick)["status"]
+        assert status == ("sale" if tick == first_sale else "cooldown")
+
+
+def test_send_discards_a_sale_prepared_in_an_earlier_week(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)
+    monkeypatch.setenv("KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex())
+    boundary = s["start"] + WEEK
+    head_at(s, boundary - 1201)
+    real = keeper_module.timing
+    later = {"block": 0, "ts": boundary + 11, "clock": boundary + 12,
+             "head_left": WEEK - 11, "clock_left": WEEK - 12, "head_age": 1}
+    calls = []
+
+    def timing(client, clock):
+        calls.append(1)
+        return real(client, clock) if len(calls) == 1 else later
+
+    # An unscheduled run whose head and clock both move into the next week mid-preparation.
+    monkeypatch.setattr(keeper_module, "timing", timing)
+    nonce = s["client"].eth.get_transaction_count(s["keeper"])
+    assert run(s["client"], s["c"], True, tmp_path)["status"] == "boundary"
+    assert s["client"].eth.get_transaction_count(s["keeper"]) == nonce
+
+
+def test_sent_fallback_checkpoint_records_the_week(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)
+    monkeypatch.setenv("KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex())
+    fail_calls(s, monkeypatch, s["escrow"].functions.quote(0))
+    result = run(s["client"], s["c"], True, tmp_path)
+    assert result["status"] == "simulation failed" and result["fallback"] == "checkpoint"
+    assert s["client"].eth.get_transaction_receipt(result["tx"]).status == 1
+    assert s["escrow"].functions.weeks(s["start"]).call()[0]
+
+
+def test_explicit_checkpoint_captures_the_first_new_week_head(chain, tmp_path):
+    s = chain
+    boundary = s["start"] + WEEK
+    head_at(s, boundary - 1)
+    # The old-week head with a new-week clock is not current yet.
+    assert run(
+        s["client"], s["c"], directory=tmp_path, checkpoint_only=True,
+        clock=lambda: boundary + 1,
+    )["status"] == "boundary"
+    head_at(s, boundary + 11)
+    result = run(s["client"], s["c"], directory=tmp_path, checkpoint_only=True, tick=boundary)
+    assert result["status"] == "checkpoint"
+    submit(s, result)
+    assert s["escrow"].functions.weeks(boundary).call()[0]
+
+
+def test_cooldown_raised_during_preparation_holds_the_sale(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)
+    monkeypatch.setenv("KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex())
+    boundary = s["start"] + WEEK
+    head_at(s, boundary - 1201)
+    real = keeper_module.timing
+    calls = []
+
+    def timing(client, clock):
+        calls.append(1)
+        if len(calls) == 2:
+            # The manager's cooldown increase confirms while the 23:40 sale is being prepared.
+            s["escrow"].functions.set_cooldown(1200).transact({"from": s["manager"]})
+        return real(client, clock)
+
+    monkeypatch.setattr(keeper_module, "timing", timing)
+    nonce = s["client"].eth.get_transaction_count(s["keeper"])
+    assert run(s["client"], s["c"], True, tmp_path)["status"] == "hold"
+    assert s["client"].eth.get_transaction_count(s["keeper"]) == nonce
+
+
+def test_final_decision_uses_a_clock_read_after_the_cooldown_call(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)
+    monkeypatch.setenv("KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex())
+    boundary = s["start"] + WEEK
+    head_at(s, boundary - 49)
+    # Preparation at W-48, final timing at W-37, then one second passes during the cooldown read.
+    times = [boundary - 48, boundary - 37, boundary - 35]
+    nonce = s["client"].eth.get_transaction_count(s["keeper"])
+    result = run(s["client"], s["c"], True, tmp_path, tick=boundary - 300, clock=lambda: times.pop(0))
+    assert result["status"] == "boundary"
+    assert s["client"].eth.get_transaction_count(s["keeper"]) == nonce
+
+
+def execute_batch(s, prepared):
+    for tx in prepared["transactions"]:
+        s["client"].eth.send_transaction(
+            {"from": prepared["meta"]["safeAddress"], "to": tx["to"], "data": tx["data"]}
+        )
+
+
+def test_setup_and_allowance_batches_rerun_over_a_used_allowance(chain, tmp_path, monkeypatch):
+    s = chain
+    begin(s)  # a sale has consumed part of the allowance
+    vyper, _ = setup(s["client"], s["c"], 400_000 * 10**18)
+    execute_batch(s, vyper)
+    allowance = s["crv"].functions.allowance(s["receiver"], s["escrow"].address).call()
+    assert allowance == 400_000 * 10**18
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(s["c"]))
+    monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
+    monkeypatch.setattr("sys.argv", [
+        "vyper-grant", "--config", str(config), "--out", str(tmp_path), "allowance", "--crv", "1000",
+    ])
+    main()
+    top_up = json.loads((tmp_path / "allowance-vyper.safe.json").read_text())
+    assert top_up["meta"]["allowanceAtRead"] == str(400_000 * 10**18)
+    assert len(top_up["transactions"]) == 2
+    assert "toggle" not in json.dumps(top_up)
+    execute_batch(s, top_up)
+    assert s["crv"].functions.allowance(s["receiver"], s["escrow"].address).call() == 1000 * 10**18
+
+
+def test_toggle_follows_a_fresh_read_and_doctor_flags_an_operating_gap(chain):
+    s = chain
+    s["minter"].functions.toggle_approve_mint(s["escrow"].address).transact({"from": s["receiver"]})
+    vyper, _ = setup(s["client"], s["c"], 10**24)
+    assert vyper["meta"]["mintEnabledAtRead"] is False and len(vyper["transactions"]) == 3
+    assert "problems" not in doctor(s["client"], s["c"])
+    report_ = doctor(s["client"], {**s["c"], "operating": True})
+    assert report_["problems"] == ["Vyper's mint permission is off"]
+    assert report_["creation_check"] == {"funding": "creation transaction", "proceeds": "creation transaction"}
+    execute_batch(s, vyper)
+    assert doctor(s["client"], {**s["c"], "operating": True})["problems"] == []
+
+
+def test_replacement_pauses_and_revokes_every_old_permission(chain):
+    s = chain
+    old = s["escrow"]
+    other = s["client"].eth.accounts[6]
+    old.functions.set_keeper(other, True).transact({"from": s["manager"]})
+    gone = s["client"].eth.accounts[7]
+    old.functions.set_keeper(gone, True).transact({"from": s["manager"]})
+    old.functions.set_keeper(gone, False).transact({"from": s["manager"]})
+    new = s["deploy"]("proceeds")
+    with pytest.raises(ValueError, match="must differ"):
+        setup(s["client"], s["c"], 10**24, new.address, 1)
+    with pytest.raises(ValueError, match="replace-block"):
+        setup(s["client"], s["c"], 10**24, old.address)
+    vyper, manager = setup(s["client"], s["c"], 10**24, old.address, 1)
+    execute_batch(s, manager)
+    execute_batch(s, vyper)
+    assert old.functions.paused().call()
+    assert enabled_keepers(s["client"], old, 1) == []
+    assert s["crv"].functions.allowance(s["receiver"], old.address).call() == 0
+    assert not s["minter"].functions.allowed_to_mint_for(old.address, s["receiver"]).call()
+    assert s["crv"].functions.allowance(s["receiver"], new.address).call() == 10**24
+    assert s["minter"].functions.allowed_to_mint_for(new.address, s["receiver"]).call()
+    assert new.functions.keepers(s["keeper"]).call()
+    # Rerunning after both batches builds no further changes to the old escrow.
+    vyper, manager = setup(s["client"], s["c"], 10**24, old.address, 1)
+    assert len(manager["transactions"]) == 1 and len(vyper["transactions"]) == 3
+
+
+def test_historical_vote_search_is_bounded_and_checked(chain):
+    s = chain
+    s["tester"].time_travel(s["start"] + 100)
+    s["tester"].mine_block()
+    final = s["client"].eth.get_block("finalized")
+    assert historical_vote(s["client"], s["start"], final, 1)["slope"] == 10**12
+    with pytest.raises(ValueError, match="multiple"):
+        historical_vote(s["client"], s["start"] + 1, final, 1)
+    first = next(
+        n for n in range(final["number"] + 1)
+        if s["client"].eth.get_block(n)["timestamp"] >= s["start"]
+    )
+    with pytest.raises(ValueError, match="deployment_block"):
+        historical_vote(s["client"], s["start"], final, first + 50_400)
+
+
+def test_proceeds_deployment_gas_includes_the_weekly_update_once(chain):
+    s = chain
+    for name, extra in [("funding", 0), ("proceeds", 1_000_000)]:
+        tx = deployment(s["client"], {}, name, s["deployer"])["transaction"]
+        estimate = s["client"].eth.estimate_gas(
+            {"from": s["deployer"], "data": artifact(name)["bytecode"]}
+        )
+        assert tx["gas"] == estimate * 12 // 10 + extra
+
+
+def test_creation_transaction_is_checked_where_configured(chain, tmp_path):
+    s = chain
+    verify(s["client"], s["c"])
+    swapped = {**s["c"], "proceeds_tx": s["c"]["funding_tx"]}
+    with pytest.raises(ValueError, match="proceeds creation"):
+        verify(s["client"], swapped, names=("proceeds",))
+    with pytest.raises(ValueError, match="proceeds creation"):
+        run(s["client"], swapped, directory=tmp_path)
+    legacy = {k: v for k, v in s["c"].items() if not k.endswith("_tx")}
+    verify(s["client"], legacy)
+    assert doctor(s["client"], legacy)["creation_check"]["proceeds"] == "runtime only"
+
+
+def test_cli_errors_print_only_owned_messages(chain, tmp_path, monkeypatch, capsys):
+    s = chain
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(s["c"]))
+
+    def leaky():
+        raise ConnectionError("HTTPConnectionPool: Max retries exceeded with url: /v2/SECRETKEY123")
+
+    monkeypatch.setattr("vyper_grant.cli.rpc", leaky)
+    monkeypatch.setattr("sys.argv", ["vyper-grant", "--config", str(config), "doctor"])
+    with pytest.raises(SystemExit):
+        main()
+    err = capsys.readouterr().err
+    assert "SECRETKEY123" not in err and err.strip() == "Error: ConnectionError"
+
+
+def test_doctor_verifies_proceeds_without_a_keeper(chain):
+    s = chain
+    status = doctor(s["client"], {**s["c"], "keeper": None})
+    assert status["creation_check"]["proceeds"] == "creation transaction"
+    assert status["keeper_enabled"] is False
+    with pytest.raises(ValueError, match="proceeds creation"):
+        doctor(s["client"], {**s["c"], "keeper": None, "proceeds_tx": s["c"]["funding_tx"]})

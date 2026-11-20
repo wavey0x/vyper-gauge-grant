@@ -3,8 +3,10 @@
 from functools import lru_cache
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit
 import json
 import os
+import re
 import tempfile
 from web3 import Web3
 
@@ -28,6 +30,23 @@ ADDRESSES = {
     "stable_pool": "0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E",
 }
 CONTRACTS = {"funding": "FundingEscrow", "proceeds": "ProceedsEscrow"}
+
+
+SECRET_ENV = ("ETHEREUM_RPC_URL", "MAINNET_RPC_URL", "ETHERSCAN_KEY")
+
+
+def printable(error):
+    """Print this tool's own messages only, and never one containing part of a configured secret."""
+    text, hidden = str(error), type(error).__name__
+    if type(error) not in (ValueError, FileNotFoundError) or "://" in text:
+        return hidden
+    for key in SECRET_ENV:
+        value = os.environ.get(key) or ""
+        parts = urlsplit(value)
+        fragments = [value, parts.netloc, parts.query, *parts.path.split("/")]
+        if any(len(f) >= 6 and f in text for f in fragments):
+            return hidden
+    return text
 
 
 def address(value):
@@ -59,6 +78,9 @@ def load_config(path):
         "sell_vyper",
         "slippage_bps",
         "max_gas_gwei",
+        "funding_tx",
+        "proceeds_tx",
+        "operating",
     }
     if set(c) - allowed:
         raise ValueError(
@@ -82,6 +104,11 @@ def load_config(path):
         raise ValueError("Maximum CRV must be at least the minimum trade")
     if type(c.get("sell_vyper", True)) is not bool:
         raise ValueError("sell_vyper must be a boolean")
+    if type(c.get("operating", False)) is not bool:
+        raise ValueError("operating must be a boolean")
+    for key in ["funding_tx", "proceeds_tx"]:
+        if c.get(key) is not None and not re.fullmatch(r"0x[0-9a-fA-F]{64}", str(c[key])):
+            raise ValueError(key + " must be a transaction hash")
     return c
 
 

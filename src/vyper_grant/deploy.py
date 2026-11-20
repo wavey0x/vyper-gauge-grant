@@ -10,10 +10,11 @@ from pathlib import Path
 import requests
 from eth_account import Account
 from web3 import Web3
+from web3.exceptions import TransactionNotFound
 
 from .chain import verify
 from .cli import deployment
-from .core import CONTRACTS, ROOT, address, artifact, atomic_json, load_config, rpc
+from .core import CONTRACTS, ROOT, address, artifact, atomic_json, load_config, printable, rpc
 
 
 def verification_input(name):
@@ -95,7 +96,7 @@ def deploy_contract(client, name, account, record, journal):
         if client.eth.get_transaction_count(account.address, "pending") != nonce:
             raise ValueError("Account has a pending transaction; resolve it before deploying")
         tx = deployment(client, {}, name, account.address)["transaction"]
-        tx.update(nonce=nonce, gas=tx["gas"] * 12 // 10)
+        tx.update(nonce=nonce)
         signed = account.sign_transaction(tx)
         record["tx"] = Web3.to_hex(signed.hash)
         atomic_json(journal[0], journal[1])
@@ -103,9 +104,9 @@ def deploy_contract(client, name, account, record, journal):
         client.eth.send_raw_transaction(signed.raw_transaction)
     receipt = client.eth.wait_for_transaction_receipt(record["tx"], timeout=180)
     if receipt.status != 1 or not receipt.contractAddress:
-        raise ValueError(f"{name} deployment reverted; inspect {record['tx']}")
+        raise ValueError(f"{name} deployment {record['tx']} reverted; inspect it, then rerun with --retry-failed")
     deployed = receipt.contractAddress
-    verify(client, {name: deployed}, names=(name,))
+    verify(client, {name: deployed, name + "_tx": record["tx"]}, names=(name,))
     record.update(address=deployed, block=receipt.blockNumber)
     atomic_json(journal[0], journal[1])
     return deployed
@@ -120,18 +121,45 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--broadcast", action="store_true", help="Unlock, deploy and verify")
     mode.add_argument("--verify-only", action="store_true", help="Verify saved deployments")
+    parser.add_argument(
+        "--retry-failed", action="store_true",
+        help="Replace a journaled deployment whose transaction is confirmed reverted",
+    )
     args = parser.parse_args()
     try:
         execute(args)
     except Exception as exc:
-        # Provider/explorer exceptions can contain private RPC URLs or API keys.
-        message = str(exc)
-        for key in ["ETHEREUM_RPC_URL", "MAINNET_RPC_URL", "ETHERSCAN_KEY"]:
-            if os.environ.get(key):
-                message = message.replace(os.environ[key], "[redacted]")
-        raise SystemExit(
-            message + "\nAny recorded deployment transaction is retained in the journal."
-        ) from None
+        raise SystemExit(error_message(exc)) from None
+
+
+def error_message(exc):
+    """Print only this tool's own messages; provider and explorer errors can contain secrets."""
+    return "Error: " + printable(exc) + "\nAny recorded deployment transaction is retained in the journal."
+
+
+def resolve_failed(client, args, state, names):
+    """Find journaled deployments confirmed reverted before any cost or signer decision."""
+    for name in names:
+        record = state[name]
+        if not record.get("tx") or record.get("address"):
+            continue
+        try:
+            receipt = client.eth.get_transaction_receipt(record["tx"])
+        except TransactionNotFound:
+            continue  # pending or unknown: resuming waits on it and never replaces it
+        if receipt.status == 1:
+            continue
+        if receipt.blockNumber > client.eth.get_block("finalized")["number"]:
+            raise ValueError(
+                f"{CONTRACTS[name]} deployment {record['tx']} reverted but isn't finalized; rerun later"
+            )
+        if not (args.broadcast and getattr(args, "retry_failed", False)):
+            raise ValueError(
+                f"{CONTRACTS[name]} deployment {record['tx']} reverted; "
+                "inspect it, then rerun with --broadcast --retry-failed"
+            )
+        record.setdefault("failed", []).append(record.pop("tx"))
+        atomic_json(args.journal, state)
 
 
 def execute(args):
@@ -148,11 +176,14 @@ def execute(args):
         record = state.setdefault(name, {})
         if c.get(name) and c[name] != record.get("address"):
             raise ValueError(f"Config already contains an unrecorded {name} deployment; refusing to overwrite")
+        if c.get(name + "_tx") and record.get("tx") and c[name + "_tx"] != record["tx"]:
+            raise ValueError(f"Config {name}_tx differs from the journal; refusing to continue")
 
     if args.verify_only:
         if not all(state[n].get("address") for n in names):
             raise ValueError("Selected deployment addresses are required")
     else:
+        resolve_failed(client, args, state, names)
         if Path(args.account).name != args.account:
             raise ValueError("Use a Brownie account name, not a path")
         keystore_path = Path.home() / ".brownie/accounts" / (args.account + ".json")
@@ -168,7 +199,7 @@ def execute(args):
                 print(f"{CONTRACTS[name]}: resuming {state[name]['tx']}")
                 continue
             tx = deployment(client, c, name, sender)["transaction"]
-            gas = tx["gas"] * 12 // 10
+            gas = tx["gas"]
             cost += gas * tx.get("maxFeePerGas", tx.get("gasPrice", 0))
             print(f"{CONTRACTS[name]}: {gas:,} gas limit · no constructor arguments")
         print(f"Maximum estimated deployment gas cost: {Web3.from_wei(cost, 'ether')} ETH")
@@ -191,6 +222,7 @@ def execute(args):
             c[name] = deploy_contract(
                 client, name, account, state[name], (args.journal, state)
             )
+            c[name + "_tx"] = state[name]["tx"]
             c["deployment_block"] = min(
                 [state[n]["block"] for n in names if state[n].get("block")]
                 + ([c["deployment_block"]] if c.get("deployment_block") is not None else [])
@@ -202,7 +234,7 @@ def execute(args):
         raise ValueError("ETHERSCAN_KEY is required")
     for name in names:
         deployed = state[name]["address"]
-        verify(client, {name: deployed}, names=(name,))
+        verify(client, {name: deployed, name + "_tx": state[name]["tx"]}, names=(name,))
         print(f"Verifying {CONTRACTS[name]}…", flush=True)
         publish(name, deployed, sources[name])
         print(f"Verified: https://etherscan.io/address/{deployed}#code", flush=True)
