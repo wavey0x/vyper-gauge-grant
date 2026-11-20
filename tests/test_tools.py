@@ -64,3 +64,17 @@ def test_generated_artifacts_match_contract_sources():
             output_formats=["abi", "bytecode", "bytecode_runtime"],
         )
         assert artifact(name) == expected
+
+
+def test_printable_errors_hide_configured_secret_fragments(monkeypatch):
+    from vyper_grant.core import printable
+
+    monkeypatch.setenv("ETHEREUM_RPC_URL", "https://rpc.example/v2/SECRETSENTINEL")
+    monkeypatch.setenv("ETHERSCAN_KEY", "EXPLORERKEY123")
+    assert printable(ValueError("provider failed at /v2/SECRETSENTINEL")) == "ValueError"
+    assert printable(ValueError("rejected key EXPLORERKEY123")) == "ValueError"
+    assert printable(ValueError("see https://elsewhere/x")) == "ValueError"
+    assert printable(ConnectionError("Selected deployment addresses are required")) == "ConnectionError"
+    assert printable(ValueError("Selected deployment addresses are required")) == (
+        "Selected deployment addresses are required"
+    )

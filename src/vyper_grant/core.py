@@ -3,6 +3,7 @@
 from functools import lru_cache
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit
 import json
 import os
 import re
@@ -29,6 +30,23 @@ ADDRESSES = {
     "stable_pool": "0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E",
 }
 CONTRACTS = {"funding": "FundingEscrow", "proceeds": "ProceedsEscrow"}
+
+
+SECRET_ENV = ("ETHEREUM_RPC_URL", "MAINNET_RPC_URL", "ETHERSCAN_KEY")
+
+
+def printable(error):
+    """Print this tool's own messages only, and never one containing part of a configured secret."""
+    text, hidden = str(error), type(error).__name__
+    if type(error) not in (ValueError, FileNotFoundError) or "://" in text:
+        return hidden
+    for key in SECRET_ENV:
+        value = os.environ.get(key) or ""
+        parts = urlsplit(value)
+        fragments = [value, parts.netloc, parts.query, *parts.path.split("/")]
+        if any(len(f) >= 6 and f in text for f in fragments):
+            return hidden
+    return text
 
 
 def address(value):

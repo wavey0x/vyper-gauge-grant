@@ -169,6 +169,12 @@ def test_confirmed_failed_deployment_is_replaced_only_on_request(deployment_run)
     fingerprint = deploy.Web3.to_hex(deploy.Web3.keccak(text=json.dumps(sources, sort_keys=True)))
     args.journal.write_text(json.dumps({"build": fingerprint, "funding": {"tx": deploy.Web3.to_hex(failed)}}))
     args.only, args.broadcast = "funding", True
+    real_block = client.eth.get_block
+    unfinalized = lambda block, *a, **k: {"number": 0} if block == "finalized" else real_block(block, *a, **k)
+    deploy.rpc().eth.get_block = unfinalized
+    with pytest.raises(ValueError, match="finalized"):
+        deploy.execute(args)
+    deploy.rpc().eth.get_block = real_block
     with pytest.raises(ValueError, match="retry-failed"):
         deploy.execute(args)
     assert prompts == []
@@ -189,3 +195,14 @@ def test_deploy_errors_print_only_owned_messages():
     owned = ValueError("Selected deployment addresses are required")
     assert "Selected deployment addresses are required" in deploy.error_message(owned)
     assert "KEY" not in deploy.error_message(ValueError("see https://rpc.example/v2/KEY"))
+
+
+def test_config_hash_must_match_the_journal(deployment_run):
+    s, args, _, prompts, _ = deployment_run
+    args.broadcast = True
+    deploy.execute(args)
+    saved = json.loads(args.config.read_text())
+    saved["funding_tx"] = saved["proceeds_tx"]
+    args.config.write_text(json.dumps(saved))
+    with pytest.raises(ValueError, match="differs from the journal"):
+        deploy.execute(args)

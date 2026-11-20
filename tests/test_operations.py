@@ -1033,3 +1033,12 @@ def test_cli_errors_print_only_owned_messages(chain, tmp_path, monkeypatch, caps
         main()
     err = capsys.readouterr().err
     assert "SECRETKEY123" not in err and err.strip() == "Error: ConnectionError"
+
+
+def test_doctor_verifies_proceeds_without_a_keeper(chain):
+    s = chain
+    status = doctor(s["client"], {**s["c"], "keeper": None})
+    assert status["creation_check"]["proceeds"] == "creation transaction"
+    assert status["keeper_enabled"] is False
+    with pytest.raises(ValueError, match="proceeds creation"):
+        doctor(s["client"], {**s["c"], "keeper": None, "proceeds_tx": s["c"]["funding_tx"]})

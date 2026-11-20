@@ -14,7 +14,7 @@ from web3.exceptions import TransactionNotFound
 
 from .chain import verify
 from .cli import deployment
-from .core import CONTRACTS, ROOT, address, artifact, atomic_json, load_config, rpc
+from .core import CONTRACTS, ROOT, address, artifact, atomic_json, load_config, printable, rpc
 
 
 def verification_input(name):
@@ -134,9 +134,7 @@ def main():
 
 def error_message(exc):
     """Print only this tool's own messages; provider and explorer errors can contain secrets."""
-    text = str(exc)
-    message = text if type(exc) is ValueError and "://" not in text else type(exc).__name__
-    return "Error: " + message + "\nAny recorded deployment transaction is retained in the journal."
+    return "Error: " + printable(exc) + "\nAny recorded deployment transaction is retained in the journal."
 
 
 def resolve_failed(client, args, state, names):
@@ -151,6 +149,10 @@ def resolve_failed(client, args, state, names):
             continue  # pending or unknown: resuming waits on it and never replaces it
         if receipt.status == 1:
             continue
+        if receipt.blockNumber > client.eth.get_block("finalized")["number"]:
+            raise ValueError(
+                f"{CONTRACTS[name]} deployment {record['tx']} reverted but isn't finalized; rerun later"
+            )
         if not (args.broadcast and getattr(args, "retry_failed", False)):
             raise ValueError(
                 f"{CONTRACTS[name]} deployment {record['tx']} reverted; "
@@ -174,6 +176,8 @@ def execute(args):
         record = state.setdefault(name, {})
         if c.get(name) and c[name] != record.get("address"):
             raise ValueError(f"Config already contains an unrecorded {name} deployment; refusing to overwrite")
+        if c.get(name + "_tx") and record.get("tx") and c[name + "_tx"] != record["tx"]:
+            raise ValueError(f"Config {name}_tx differs from the journal; refusing to continue")
 
     if args.verify_only:
         if not all(state[n].get("address") for n in names):

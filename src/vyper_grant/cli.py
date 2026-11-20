@@ -13,6 +13,7 @@ from .core import (
     atomic_json,
     contract,
     load_config,
+    printable,
     rpc,
     units,
 )
@@ -74,12 +75,13 @@ def setup(client, c, allowance, replace=None, replace_block=None):
             raise ValueError("--replace-block, the old escrow's creation block, is required")
         # Only the current ProceedsEscrow build is handled; revoke older sellers manually.
         (old,) = verify(client, {"proceeds": old_address}, names=("proceeds",))
+        old_mint = m.allowed_to_mint_for(old.address, A["receiver"]).call(block_identifier=block)
         if not old.functions.paused().call(block_identifier=block):
             manager.append(old.functions.set_paused(True))
         for account in enabled_keepers(client, old, replace_block):
             manager.append(old.functions.set_keeper(account, False))
         vyper += allowance_calls(client, old.address, 0)
-        if m.allowed_to_mint_for(old.address, A["receiver"]).call(block_identifier=block):
+        if old_mint:
             vyper.append(m.toggle_approve_mint(old.address))
     vyper += allowance_calls(client, escrow.address, allowance)
     # toggle_approve_mint flips the flag, so it is built from this read and must run once.
@@ -88,6 +90,8 @@ def setup(client, c, allowance, replace=None, replace_block=None):
         vyper.append(m.toggle_approve_mint(escrow.address))
     manager.append(escrow.functions.set_keeper(address(c["keeper"]), True))
     meta = {"readBlock": block, "mintEnabledAtRead": mint}
+    if replace:
+        meta.update(replacing=old.address, oldMintEnabledAtRead=old_mint)
     return batch(A["receiver"], *vyper, **meta), batch(A["manager"], *manager, readBlock=block)
 
 
@@ -107,22 +111,25 @@ def doctor(client, c):
         raise ValueError("Unexpected vault asset")
     if contract(client, "gauge").functions.receiver().call() != A["receiver"]:
         raise ValueError("Unexpected gauge receiver")
+    verified = []
     if c.get("funding"):
         (f,) = verify(client, c, names=("funding",))
+        verified.append("funding")
         result.update(
             funding_assets=str(f.functions.assets().call()),
             funding_recipient=f.functions.recipient().call(),
             funding_next_week=f.functions.next_week().call(),
             funding_can_work=f.functions.canWork().call(),
         )
-    if all(c.get(k) is not None for k in ["proceeds", "keeper"]):
+    if c.get("proceeds"):
         (p,) = verify(client, c, names=("proceeds",))
+        verified.append("proceeds")
         result.update(
             paused=p.functions.paused().call(),
             cooldown=p.functions.cooldown().call(),
             can_work=p.functions.canWork().call(),
             yearn_receiver=p.functions.yearn_receiver().call(),
-            keeper_enabled=p.functions.keepers(c["keeper"]).call(),
+            keeper_enabled=bool(c.get("keeper")) and p.functions.keepers(c["keeper"]).call(),
             mint_enabled=contract(client, "minter")
             .functions.allowed_to_mint_for(p.address, A["receiver"])
             .call(),
@@ -142,10 +149,9 @@ def doctor(client, c):
                 ]
                 if failed
             ]
+    # Only contracts verify() actually checked are labelled.
     result["creation_check"] = {
-        n: "creation transaction" if c.get(n + "_tx") else "runtime only"
-        for n in ["funding", "proceeds"]
-        if c.get(n)
+        n: "creation transaction" if c.get(n + "_tx") else "runtime only" for n in verified
     }
     return result
 
@@ -345,13 +351,7 @@ def main():
         atomic_json(path, result)
         print(str(path))
     except Exception as error:
-        # Only this tool's own messages are printed; provider errors can contain secrets.
-        message = (
-            str(error)
-            if type(error) in (ValueError, FileNotFoundError) and "://" not in str(error)
-            else type(error).__name__
-        )
-        print("Error: " + message, file=sys.stderr)
+        print("Error: " + printable(error), file=sys.stderr)
         raise SystemExit(1)
 
 
