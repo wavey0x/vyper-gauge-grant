@@ -10,6 +10,8 @@ def mint(account: address, amount: uint256):
     self.balanceOf[account] += amount
 @external
 def approve(spender: address, amount: uint256) -> bool:
+    # Like ERC20CRV, an allowance only changes to or from zero.
+    assert amount == 0 or self.allowance[msg.sender][spender] == 0, "approve"
     self.allowance[msg.sender][spender] = amount
     return True
 @external

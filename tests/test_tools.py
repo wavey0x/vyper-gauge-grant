@@ -64,3 +64,29 @@ def test_generated_artifacts_match_contract_sources():
             output_formats=["abi", "bytecode", "bytecode_runtime"],
         )
         assert artifact(name) == expected
+
+
+def test_printable_errors_hide_configured_secret_fragments(monkeypatch):
+    from vyper_grant.core import printable
+
+    monkeypatch.setenv("ETHEREUM_RPC_URL", "https://rpc.example/v2/SECRETSENTINEL")
+    monkeypatch.setenv("ETHERSCAN_KEY", "EXPLORERKEY123")
+    assert printable(ValueError("provider failed at /v2/SECRETSENTINEL")) == "ValueError"
+    assert printable(ValueError("rejected key EXPLORERKEY123")) == "ValueError"
+    assert printable(ValueError("see https://elsewhere/x")) == "ValueError"
+    assert printable(ConnectionError("Selected deployment addresses are required")) == "ConnectionError"
+    assert printable(ValueError("Selected deployment addresses are required")) == (
+        "Selected deployment addresses are required"
+    )
+
+
+def test_guard_config_requires_its_creation_hash(tmp_path):
+    c = json.loads((ROOT / "config/example.json").read_text())
+    c["guard"] = "0x" + "12" * 20
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps(c))
+    with pytest.raises(ValueError, match="guard_tx"):
+        load_config(p)
+    c["guard_tx"] = "0x" + "ab" * 32
+    p.write_text(json.dumps(c))
+    assert load_config(p)["guard_tx"] == c["guard_tx"]

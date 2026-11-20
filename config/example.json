@@ -1,11 +1,14 @@
 {
   "funding": null,
   "proceeds": null,
+  "funding_tx": null,
+  "proceeds_tx": null,
   "deployment_block": null,
   "keeper": null,
   "min_trade_crv": "100",
   "max_crv": "15000",
   "sell_vyper": true,
   "slippage_bps": 50,
-  "max_gas_gwei": "20"
+  "max_gas_gwei": "20",
+  "operating": false
 }

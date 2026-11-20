@@ -3,8 +3,10 @@
 from functools import lru_cache
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit
 import json
 import os
+import re
 import tempfile
 from web3 import Web3
 
@@ -26,8 +28,27 @@ ADDRESSES = {
     "minter": "0xd061D61a4d941c39E5453435B6345Dc261C2fcE0",
     "pool": "0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14",
     "stable_pool": "0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E",
+    "feed": "0xCd627aA160A6fA45Eb793D19Ef54f5062F20f33f",
 }
-CONTRACTS = {"funding": "FundingEscrow", "proceeds": "ProceedsEscrow"}
+CONTRACTS = {"funding": "FundingEscrow", "proceeds": "ProceedsEscrow", "guard": "KeeperGuard"}
+ESCROWS = ("funding", "proceeds")  # deployed by default; the optional guard takes arguments
+
+
+SECRET_ENV = ("ETHEREUM_RPC_URL", "MAINNET_RPC_URL", "ETHERSCAN_KEY")
+
+
+def printable(error):
+    """Print this tool's own messages only, and never one containing part of a configured secret."""
+    text, hidden = str(error), type(error).__name__
+    if type(error) not in (ValueError, FileNotFoundError) or "://" in text:
+        return hidden
+    for key in SECRET_ENV:
+        value = os.environ.get(key) or ""
+        parts = urlsplit(value)
+        fragments = [value, parts.netloc, parts.query, *parts.path.split("/")]
+        if any(len(f) >= 6 and f in text for f in fragments):
+            return hidden
+    return text
 
 
 def address(value):
@@ -59,13 +80,18 @@ def load_config(path):
         "sell_vyper",
         "slippage_bps",
         "max_gas_gwei",
+        "funding_tx",
+        "proceeds_tx",
+        "operating",
+        "guard",
+        "guard_tx",
     }
     if set(c) - allowed:
         raise ValueError(
             "Unknown or obsolete configuration fields: "
             + ", ".join(sorted(set(c) - allowed))
         )
-    for key in ["funding", "proceeds", "keeper"]:
+    for key in ["funding", "proceeds", "keeper", "guard"]:
         if c.get(key):
             c[key] = address(c[key])
     for key in [
@@ -82,6 +108,13 @@ def load_config(path):
         raise ValueError("Maximum CRV must be at least the minimum trade")
     if type(c.get("sell_vyper", True)) is not bool:
         raise ValueError("sell_vyper must be a boolean")
+    if type(c.get("operating", False)) is not bool:
+        raise ValueError("operating must be a boolean")
+    if c.get("guard") and not c.get("guard_tx"):
+        raise ValueError("guard_tx is required with guard, so its creation can be verified")
+    for key in ["funding_tx", "proceeds_tx", "guard_tx"]:
+        if c.get(key) is not None and not re.fullmatch(r"0x[0-9a-fA-F]{64}", str(c[key])):
+            raise ValueError(key + " must be a transaction hash")
     return c
 
 

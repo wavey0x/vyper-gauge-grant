@@ -8,7 +8,7 @@ from eth_account import Account
 
 from test_operations import chain  # Reuse the fixed-address mainnet-dependency fixture.
 from vyper_grant import deploy
-from vyper_grant.core import CONTRACTS, ROOT
+from vyper_grant.core import CONTRACTS, ESCROWS, ROOT
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def test_dry_run_then_deploy_verify_and_resume_without_duplicates(deployment_run
     assert len(prompts) == 1 and len(published) == 2
     assert saved["deployment_block"] == journal["funding"]["block"]
     assert saved["keeper"] is None  # Deployment does not authorize the signer as keeper.
-    for name in CONTRACTS:
+    for name in ESCROWS:
         assert saved[name] == journal[name]["address"]
         assert s["client"].eth.get_code(saved[name])
     deploy.execute(args)
@@ -157,3 +157,83 @@ def test_explorer_failure_is_not_reported_as_success(monkeypatch):
         deploy.publish("funding", "0x" + "12" * 20, {})
     monkeypatch.setattr(deploy, "etherscan", lambda *a, **k: {"status": "0", "result": "Contract source code already verified"})
     deploy.publish("funding", "0x" + "12" * 20, {})
+
+
+def test_confirmed_failed_deployment_is_replaced_only_on_request(deployment_run):
+    s, args, _, prompts, _ = deployment_run
+    client = s["client"]
+    # A creation transaction that reverts: PUSH1 0 PUSH1 0 REVERT.
+    failed = client.eth.send_transaction({"from": s["deployer"], "data": "0x60006000fd", "gas": 100_000})
+    assert client.eth.get_transaction_receipt(failed).status == 0
+    sources = {"funding": deploy.verification_input("funding")}
+    fingerprint = deploy.Web3.to_hex(deploy.Web3.keccak(text=json.dumps(sources, sort_keys=True)))
+    args.journal.write_text(json.dumps({"build": fingerprint, "funding": {"tx": deploy.Web3.to_hex(failed)}}))
+    args.only, args.broadcast = "funding", True
+    real_block = client.eth.get_block
+    unfinalized = lambda block, *a, **k: {"number": 0} if block == "finalized" else real_block(block, *a, **k)
+    deploy.rpc().eth.get_block = unfinalized
+    with pytest.raises(ValueError, match="finalized"):
+        deploy.execute(args)
+    deploy.rpc().eth.get_block = real_block
+    with pytest.raises(ValueError, match="retry-failed"):
+        deploy.execute(args)
+    assert prompts == []
+    args.retry_failed = True
+    deploy.execute(args)
+    journal = json.loads(args.journal.read_text())
+    assert journal["funding"]["failed"] == [deploy.Web3.to_hex(failed)]
+    assert journal["funding"]["tx"] != journal["funding"]["failed"][0]
+    saved = json.loads(args.config.read_text())
+    assert saved["funding"] == journal["funding"]["address"]
+    assert saved["funding_tx"] == journal["funding"]["tx"]
+
+
+def test_deploy_errors_print_only_owned_messages():
+    leak = ConnectionError("HTTPConnectionPool: Max retries exceeded with url: /v2/SECRETKEY123")
+    assert "SECRETKEY123" not in deploy.error_message(leak)
+    assert deploy.error_message(leak).startswith("Error: ConnectionError")
+    owned = ValueError("Selected deployment addresses are required")
+    assert "Selected deployment addresses are required" in deploy.error_message(owned)
+    assert "KEY" not in deploy.error_message(ValueError("see https://rpc.example/v2/KEY"))
+
+
+def test_config_hash_must_match_the_journal(deployment_run):
+    s, args, _, prompts, _ = deployment_run
+    args.broadcast = True
+    deploy.execute(args)
+    saved = json.loads(args.config.read_text())
+    saved["funding_tx"] = saved["proceeds_tx"]
+    args.config.write_text(json.dumps(saved))
+    with pytest.raises(ValueError, match="differs from the journal"):
+        deploy.execute(args)
+
+
+def test_guard_deploys_with_its_arguments_without_moving_the_report_start(deployment_run):
+    s, args, _, prompts, published = deployment_run
+    config = json.loads((ROOT / "config/example.json").read_text())
+    config.update(proceeds=s["escrow"].address, keeper=s["keeper"], deployment_block=1)
+    args.config.write_text(json.dumps(config))
+    args.only, args.broadcast = "guard", True
+    deploy.execute(args)
+    saved = json.loads(args.config.read_text())
+    assert saved["guard"] and saved["guard_tx"] and saved["deployment_block"] == 1
+    assert published[0][0] == "guard" and published[0][3] == deploy.encoded_arguments(saved, "guard")
+    assert len(published[0][3]) == 128
+
+
+def test_guard_deploy_checks_its_escrow_and_tolerates_no_report_start(deployment_run):
+    s, args, _, _, published = deployment_run
+    config = json.loads((ROOT / "config/example.json").read_text())
+    config.update(proceeds=s["gauge"].address, keeper=s["keeper"], deployment_block=None)
+    args.config.write_text(json.dumps(config))
+    args.only, args.broadcast = "guard", True
+    nonce = s["client"].eth.get_transaction_count(s["deployer"])
+    with pytest.raises(ValueError, match="bytecode"):
+        deploy.execute(args)
+    assert s["client"].eth.get_transaction_count(s["deployer"]) == nonce
+    config["proceeds"] = s["escrow"].address
+    args.config.write_text(json.dumps(config))
+    args.journal.unlink(missing_ok=True)
+    deploy.execute(args)
+    saved = json.loads(args.config.read_text())
+    assert saved["guard"] and saved["guard_tx"] and saved["deployment_block"] is None
