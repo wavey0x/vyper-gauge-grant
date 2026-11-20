@@ -188,21 +188,20 @@ def main():
             print("Prepared Vyper and manager setup batches")
             return
         elif args.command in ["keeper", "checkpoint", "funding-keeper"]:
-            from .keeper import run
+            from .keeper import FAILURES, run
 
-            print(
-                json.dumps(
-                    run(
-                        client,
-                        c,
-                        args.send,
-                        out / "keeper",
-                        checkpoint_only=args.command == "checkpoint",
-                        funding_only=args.command == "funding-keeper",
-                    ),
-                    indent=2,
-                )
+            result = run(
+                client,
+                c,
+                args.send,
+                out / "keeper",
+                checkpoint_only=args.command == "checkpoint",
+                funding_only=args.command == "funding-keeper",
             )
+            print(json.dumps(result, indent=2))
+            if result["status"] in FAILURES:
+                # Monitoring distinguishes a failed simulation from an ordinary skip.
+                raise SystemExit(3)
             return
         else:
             funding_only = args.command in ["fund-round", "cancel-round", "set-recipient", "recover"]
