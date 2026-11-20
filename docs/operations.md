@@ -63,7 +63,7 @@ Alert on:
   - The manager can pause the escrow or revoke the keeper.
   - Vyper can revoke the allowance.
   - Keep a modest allowance and little ETH on the key. The ETH balance is a weak limit, because anyone can fund the address.
-  - With the optional keeper guard, every sale must return at least 97.5% of Chainlink's CRV/USD value, so a larger allowance is low-risk. The guard must be the only keeper; `setup` disables the others, and `doctor` flags the bot if it's still a direct keeper. Watch for the guard reverting with `stale` if the feed stops updating.
+  - With the optional keeper guard, every sale must return at least 97.5% of Chainlink's CRV/USD value, so a larger allowance is low-risk. The guard must be the only keeper; `setup` disables the others, and with `"operating": true` `doctor` flags any other enabled keeper. A stale feed shows as `simulation failed` with reason `execution reverted: stale`. A sale that misses the floor reverts inside the pool, so it shows as `contract revert`.
 - **Funding.**
   - Batch `fund_round` with a vote only when `next_week == 0`; otherwise the batch reverts.
   - Leave headroom for share rounding and vault liquidity. Instalments don't reserve shares, so a loss or illiquidity can leave a payment due until it is retried. An overdue round can pay both instalments in separate calls.

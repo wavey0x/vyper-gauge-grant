@@ -146,7 +146,16 @@ Run `ops/run.sh funding-keeper` on the same polling schedule for funding payment
 
 `contracts/KeeperGuard.vy` is a sell-only forwarder of about 20 lines with no owner, setters or storage. Its constructor fixes the escrow and the bot. The bot calls `guard.work(min_out, max_crv)`, and the guard calls `escrow.work(max(min_out, oracle_min), max_crv, True)`. `oracle_min` is 97.5% of `max_crv` valued at Chainlink's CRV/USD price (`0xCd62…f33f`), and the guard reverts if that price is more than 25 hours old. So a leaked bot key can sell at most 2.5% below the feed, and cannot use retain mode. The guard doesn't cap batch size, enforce timely sales or fix which week a late sale lands in. Vyper's allowance remains the volume limit.
 
-To use it, set `keeper` to the bot and deploy with `python -m vyper_grant.deploy --only guard`, which records `guard` and `guard_tx`. With `guard` configured, `setup` prepares a manager batch that enables the guard and disables every other enabled keeper. Then the keeper sends sales through the guard, and `doctor` checks that the bot is no longer a direct keeper. Checkpoints and quotes still go to the escrow. The guard requires `sell_vyper: true`. To change the bot, or if Chainlink retires the feed, deploy a new guard, update `guard` and `guard_tx`, and run `setup` again; one manager batch then swaps the guards.
+To use it, deploy into a staging config with its own journal, so the scheduled keeper keeps running on `config/live.json` until the switch:
+
+```sh
+cp config/live.json output/guard-live.json   # with keeper set, and guard and guard_tx null
+uv run --extra dev python -m vyper_grant.deploy --only guard \
+  --config output/guard-live.json --journal build/guard-deployment.json --broadcast
+uv run vyper-grant --config output/guard-live.json setup --allowance-crv AGREED_CRV_ALLOWANCE
+```
+
+The deploy checks the configured escrow first, then records `guard` and `guard_tx`; a guard config without `guard_tx` is rejected. `setup` refuses a guard unless `sell_vyper` is true, and its manager batch enables the guard and disables every other enabled keeper. Execute it away from the Wednesday 23:40–00:10 UTC window and copy `output/guard-live.json` over `config/live.json` right afterwards: from then on the keeper sends sales through the guard, while checkpoints, quotes and the explicit `checkpoint` command still go to the escrow. With `"operating": true`, `doctor` reports any enabled keeper other than the guard. To change the bot, or if Chainlink retires the feed, repeat this with a fresh journal and a staging config whose `guard` and `guard_tx` are null; the manager batch then swaps the guards.
 
 `set-recipient --account ADDRESS` changes the recipient of all unpaid funding instalments, including the current round. `set-keeper --account ADDRESS [--disable]`, `set-paused true|false`, and `set-cooldown --seconds INTEGER` (at least 600) manage sales. Cooldown changes apply immediately relative to the last successful sale. `set-yearn-receiver --account ADDRESS` prepares a manager batch to route future Yearn shares there. Use the proceeds contract's own address to resume accumulation. Zero is rejected; existing balances stay where they are.
 
