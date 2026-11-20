@@ -1053,7 +1053,7 @@ def deploy_guard(s):
     return s["client"].eth.contract(address=receipt.contractAddress, abi=artifact("guard")["abi"])
 
 
-def test_keeper_sells_through_the_guard_after_setup(chain, tmp_path):
+def test_keeper_sells_through_the_guard_after_setup(chain, tmp_path, monkeypatch):
     s = chain
     begin(s)
     guard = deploy_guard(s)
@@ -1074,6 +1074,19 @@ def test_keeper_sells_through_the_guard_after_setup(chain, tmp_path):
     function, arguments = guard.decode_function_input(result["data"])
     assert function.fn_name == "work" and arguments["max_crv"] == int(result["crv"])
     assert s["client"].eth.get_transaction_receipt(submit(s, result)).status == 1
+    # The signed path sends to the guard too.
+    monkeypatch.setenv("KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex())
+    s["crv"].functions.mint(s["receiver"], 1000 * 10**18).transact()
+    s["tester"].time_travel(s["client"].eth.get_block("latest").timestamp + 600)
+    s["tester"].mine_block()
+    sent = run(s["client"], s["c"], True, tmp_path)
+    assert sent["status"] == "sale"
+    assert s["client"].eth.get_transaction(sent["tx"])["to"] == guard.address
+    assert s["client"].eth.get_transaction_receipt(sent["tx"]).status == 1
+    # Any other enabled keeper is a problem once operating.
+    s["escrow"].functions.set_keeper(s["payee"], True).transact({"from": s["manager"]})
+    problems = doctor(s["client"], {**s["c"], "operating": True})["problems"]
+    assert problems == ["Accounts other than the guard are enabled keepers"]
 
 
 def test_guard_needs_sell_mode_and_matching_creation(chain, tmp_path):
@@ -1082,6 +1095,13 @@ def test_guard_needs_sell_mode_and_matching_creation(chain, tmp_path):
     s["escrow"].functions.set_keeper(s["c"]["guard"], True).transact({"from": s["manager"]})
     with pytest.raises(ValueError, match="sell_vyper"):
         run(s["client"], {**s["c"], "sell_vyper": False}, directory=tmp_path)
+    with pytest.raises(ValueError, match="sell_vyper"):
+        setup(s["client"], {**s["c"], "sell_vyper": False}, 10**24)
+    # The explicit public checkpoint still works when only the sale route is unusable.
+    s["tester"].time_travel(s["start"] + 100)
+    s["tester"].mine_block()
+    explicit = run(s["client"], {**s["c"], "sell_vyper": False}, directory=tmp_path, checkpoint_only=True)
+    assert explicit["status"] == "checkpoint" and explicit["to"] == s["escrow"].address
     with pytest.raises(ValueError, match="guard BOT"):
         verify(s["client"], {**s["c"], "keeper": s["payee"]}, names=("guard",))
     with pytest.raises(ValueError, match="guard creation"):

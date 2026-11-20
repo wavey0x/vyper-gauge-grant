@@ -49,6 +49,20 @@ def test_sale_at_the_floor_succeeds_and_one_unit_above_reverts(guarded):
     assert s.usdc.balanceOf(s.receiver) - before == OUTPUT  # Yearn's share is zero this week
 
 
+def test_output_exactly_at_the_floor_passes_and_one_unit_short_reverts(guarded):
+    s = guarded
+    s.feed.set(25_000_000, 0)
+    assert floor(25_000_000) == 3_656_250_000
+    s.pool.configure(10**18 // 4, 9_749)  # pays 3,655,875,000, below the floor
+    with boa.env.prank(s.keeper), boa.reverts():
+        s.guard.work(0, BATCH)
+    s.pool.configure(10**18 // 4, 9_750)  # pays exactly the floor
+    before = s.usdc.balanceOf(s.receiver)
+    with boa.env.prank(s.keeper):
+        s.guard.work(0, BATCH)
+    assert s.usdc.balanceOf(s.receiver) - before == 3_656_250_000
+
+
 def test_the_bots_higher_minimum_still_applies(guarded):
     s = guarded
     s.feed.set(20_000_000, 0)

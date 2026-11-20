@@ -219,3 +219,21 @@ def test_guard_deploys_with_its_arguments_without_moving_the_report_start(deploy
     assert saved["guard"] and saved["guard_tx"] and saved["deployment_block"] == 1
     assert published[0][0] == "guard" and published[0][3] == deploy.encoded_arguments(saved, "guard")
     assert len(published[0][3]) == 128
+
+
+def test_guard_deploy_checks_its_escrow_and_tolerates_no_report_start(deployment_run):
+    s, args, _, _, published = deployment_run
+    config = json.loads((ROOT / "config/example.json").read_text())
+    config.update(proceeds=s["gauge"].address, keeper=s["keeper"], deployment_block=None)
+    args.config.write_text(json.dumps(config))
+    args.only, args.broadcast = "guard", True
+    nonce = s["client"].eth.get_transaction_count(s["deployer"])
+    with pytest.raises(ValueError, match="bytecode"):
+        deploy.execute(args)
+    assert s["client"].eth.get_transaction_count(s["deployer"]) == nonce
+    config["proceeds"] = s["escrow"].address
+    args.config.write_text(json.dumps(config))
+    args.journal.unlink(missing_ok=True)
+    deploy.execute(args)
+    saved = json.loads(args.config.read_text())
+    assert saved["guard"] and saved["guard_tx"] and saved["deployment_block"] is None

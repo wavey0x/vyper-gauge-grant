@@ -91,6 +91,8 @@ def setup(client, c, allowance, replace=None, replace_block=None):
         vyper.append(m.toggle_approve_mint(escrow.address))
     if c.get("guard"):
         # The guard must be the only keeper, so the bot cannot bypass its price floor.
+        if not c.get("sell_vyper", True):
+            raise ValueError("The guard only sells; set sell_vyper to true before enabling it")
         (guard,) = verify(client, c, names=("guard",))
         if c.get("deployment_block") is None:
             raise ValueError("deployment_block is required to find existing keepers")
@@ -153,7 +155,10 @@ def doctor(client, c):
         guarded = bool(c.get("guard"))
         if guarded:
             (g,) = verify(client, c, names=("guard",))
+            verified.append("guard")
             result["guard_enabled"] = p.functions.keepers(g.address).call()
+            if c.get("deployment_block") is not None:
+                result["enabled_keepers"] = enabled_keepers(client, p, c["deployment_block"])
         if c.get("operating"):
             result["problems"] = [
                 text
@@ -165,6 +170,10 @@ def doctor(client, c):
                         "The guard is not enabled" if guarded else "The keeper is not enabled",
                     ),
                     (guarded and result["keeper_enabled"], "The bot is still a direct keeper"),
+                    (
+                        guarded and result.get("enabled_keepers", [g.address]) != [g.address],
+                        "Accounts other than the guard are enabled keepers",
+                    ),
                     (guarded and not c.get("sell_vyper", True), "The guard requires sell_vyper"),
                 ]
                 if failed

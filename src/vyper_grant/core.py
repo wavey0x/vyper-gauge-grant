@@ -110,6 +110,8 @@ def load_config(path):
         raise ValueError("sell_vyper must be a boolean")
     if type(c.get("operating", False)) is not bool:
         raise ValueError("operating must be a boolean")
+    if c.get("guard") and not c.get("guard_tx"):
+        raise ValueError("guard_tx is required with guard, so its creation can be verified")
     for key in ["funding_tx", "proceeds_tx", "guard_tx"]:
         if c.get(key) is not None and not re.fullmatch(r"0x[0-9a-fA-F]{64}", str(c[key])):
             raise ValueError(key + " must be a transaction hash")

@@ -78,3 +78,15 @@ def test_printable_errors_hide_configured_secret_fragments(monkeypatch):
     assert printable(ValueError("Selected deployment addresses are required")) == (
         "Selected deployment addresses are required"
     )
+
+
+def test_guard_config_requires_its_creation_hash(tmp_path):
+    c = json.loads((ROOT / "config/example.json").read_text())
+    c["guard"] = "0x" + "12" * 20
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps(c))
+    with pytest.raises(ValueError, match="guard_tx"):
+        load_config(p)
+    c["guard_tx"] = "0x" + "ab" * 32
+    p.write_text(json.dumps(c))
+    assert load_config(p)["guard_tx"] == c["guard_tx"]

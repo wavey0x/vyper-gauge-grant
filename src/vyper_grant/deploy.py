@@ -104,6 +104,8 @@ def deploy_contract(client, name, account, record, journal, c=None):
         nonce = client.eth.get_transaction_count(account.address)
         if client.eth.get_transaction_count(account.address, "pending") != nonce:
             raise ValueError("Account has a pending transaction; resolve it before deploying")
+        if name == "guard":
+            verify(client, c, names=("proceeds",))  # the guard's escrow is immutable
         tx = deployment(client, c or {}, name, account.address)["transaction"]
         tx.update(nonce=nonce)
         signed = account.sign_transaction(tx)
@@ -234,10 +236,11 @@ def execute(args):
             )
             c[name + "_tx"] = state[name]["tx"]
             # The report starts from the escrows' deployment; the guard doesn't move it.
-            c["deployment_block"] = min(
-                [state[n]["block"] for n in names if n in ESCROWS and state[n].get("block")]
-                + ([c["deployment_block"]] if c.get("deployment_block") is not None else [])
-            )
+            blocks = [state[n]["block"] for n in names if n in ESCROWS and state[n].get("block")]
+            if blocks:
+                c["deployment_block"] = min(
+                    blocks + ([c["deployment_block"]] if c.get("deployment_block") is not None else [])
+                )
             atomic_json(args.config, c)
             print(f"{CONTRACTS[name]}: https://etherscan.io/address/{c[name]}", flush=True)
 

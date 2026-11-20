@@ -23,6 +23,7 @@ FAILURES = {"simulation failed", "checkpoint failed"}  # the CLI exits 3 for the
 KNOWN_REVERTS = {
     "already captured", "cooldown", "forward", "keeper or paused", "min out",
     "missing vote history", "not due", "nothing to sell", "pull", "return", "week", "weight",
+    "bot", "floor", "stale",  # KeeperGuard; a sale below its floor reverts in the pool instead
 }
 
 
@@ -217,7 +218,7 @@ def run(
             if skip:
                 return {"status": skip}
             guard = None
-            if c.get("guard"):
+            if c.get("guard") and not checkpoint_only:
                 # verify checks the guard's escrow and that its BOT is this signer.
                 (guard,) = verify(client, c, names=("guard",))
                 if not c.get("sell_vyper", True):

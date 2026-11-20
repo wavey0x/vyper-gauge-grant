@@ -201,6 +201,7 @@ def test_revert_reasons_are_allowlisted():
     assert reason(ContractLogicError("execution reverted: missing vote history")) == (
         "execution reverted: missing vote history"
     )
+    assert reason(ContractLogicError("execution reverted: stale")) == "execution reverted: stale"
     assert reason(ContractLogicError("execution reverted: TOKEN_12345")) == "contract revert"
     leaky = ContractLogicError("execution reverted: see https://rpc.example/v2/SECRET")
     assert reason(leaky) == "contract revert"
