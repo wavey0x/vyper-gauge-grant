@@ -5,9 +5,8 @@ from pathlib import Path
 from .core import ROOT, atomic_json
 
 
-def render(data, out):
-    out = Path(out)
-    out.mkdir(parents=True, exist_ok=True)
+def page(data):
+    """Return the dashboard HTML with the report embedded as inert script data."""
     payload = (
         json.dumps(data)
         .replace("<", "\\u003c")
@@ -15,5 +14,11 @@ def render(data, out):
         .replace("&", "\\u0026")
     )
     template = (ROOT / "dashboard/template.html").read_text()
-    (out / "index.html").write_text(template.replace("/*REPORT_DATA*/{}", payload))
+    return template.replace("/*REPORT_DATA*/{}", payload)
+
+
+def render(data, out):
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "index.html").write_text(page(data))
     atomic_json(out / "report.json", data)
