@@ -74,14 +74,23 @@ def report(client, c):
 
     def events(event):
         return logs(client, event, c["deployment_block"], block)
+
+    times = {}
+
+    def timestamp(number):
+        if number not in times:
+            times[number] = client.eth.get_block(number)["timestamp"]
+        return times[number]
+
+    drawn = events(funding.events.Drawn())
     payments = [
         dict(
             usdc=e["args"]["usdc"],
             recipient=e["args"]["recipient"],
-            timestamp=client.eth.get_block(e["blockNumber"])["timestamp"],
+            timestamp=timestamp(e["blockNumber"]),
             tx=Web3.to_hex(e["transactionHash"]),
         )
-        for e in events(funding.events.Drawn())
+        for e in drawn
     ]
     start = read(proceeds.functions.DEPLOYED_WEEK())
     rows = {
@@ -89,7 +98,8 @@ def report(client, c):
         for week in range(start, final["timestamp"] + 1, WEEK)
     }
     forwarded = 0
-    for event in events(proceeds.events.Sold()):
+    sales = events(proceeds.events.Sold())
+    for event in sales:
         a = event["args"]
         rows.setdefault(
             a["week"], dict(week=a["week"], sold=0, output=0, yearn=0, vyper_crv=0)
@@ -123,6 +133,10 @@ def report(client, c):
     if read(proceeds.functions.paused()):
         warnings.append("Sales are paused; public checkpoint remains available")
     withdrawals = events(proceeds.events.Withdrawn())
+    vyper_crv = read(
+        contract(client, "token", ADDRESSES["crv"]).functions.balanceOf(proceeds.address)
+    )
+    shares = {week: row["share"] for week, row in rows.items()}
     data = dict(
         as_of=final["timestamp"],
         block=block,
@@ -143,8 +157,10 @@ def report(client, c):
                 proceeds.address
             )
         ),
-        vyper_crv_balance=read(
-            contract(client, "token", ADDRESSES["crv"]).functions.balanceOf(proceeds.address)
+        vyper_crv_balance=vyper_crv,
+        vyper_crv_claim=vyper_crv_claim(proceeds, vyper_crv),
+        transactions=activity(
+            events(proceeds.events.Snapshot()), sales, drawn, shares, timestamp
         ),
         totals={
             k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "yearn", "vyper_crv"]
@@ -165,6 +181,59 @@ def report(client, c):
     if client.eth.get_block(block)["hash"] != final["hash"]:
         raise ValueError("Source block reorganized; rerun")
     return serialize(data)
+
+
+def vyper_crv_claim(proceeds, amount):
+    """The Vyper Safe's call that withdraws all held CRV to itself."""
+    safe = ADDRESSES["receiver"]
+    call = proceeds.functions.withdraw(ADDRESSES["crv"], amount, safe)
+    return dict(safe=safe, to=proceeds.address, data=call._encode_transaction_data())
+
+
+def activity(snapshots, sales, payments, shares, timestamp):
+    """One row per checkpoint, work or funding payment transaction, newest first.
+
+    A work call that records the week's share also emits Snapshot; it is
+    shown once, as work. CRV withdrawals are not listed.
+    """
+    rows = {}
+
+    def row(event):
+        tx = Web3.to_hex(event["transactionHash"])
+        if tx not in rows:
+            rows[tx] = dict(
+                tx=tx,
+                block=event["blockNumber"],
+                index=event["logIndex"],
+                timestamp=timestamp(event["blockNumber"]),
+            )
+        return rows[tx]
+
+    for e in snapshots:
+        a = e["args"]
+        r = row(e)
+        r.setdefault("kind", "checkpoint")
+        r.update(
+            week=a["week"],
+            share=a["yearn"] * 10**18 // a["total"] if a["total"] else 0,
+            manual=a["manual"],
+        )
+    for e in sales:
+        a = e["args"]
+        r = row(e)
+        r.update(
+            kind="work",
+            week=a["week"],
+            share=shares[a["week"]],
+            crv=a["crv"] + a["vyper_crv"],
+            yearn_usdc=a["yearn"],
+            vyper_usdc=a["usdc"] - a["yearn"],
+            vyper_crv=a["vyper_crv"],
+        )
+    for e in payments:
+        r = row(e)
+        r.update(kind="payment", usdc=e["args"]["usdc"])
+    return sorted(rows.values(), key=lambda r: (r["block"], r["index"]), reverse=True)
 
 
 def serialize(value):
