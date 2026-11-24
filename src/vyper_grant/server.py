@@ -1,9 +1,9 @@
-"""Serve the dashboard on this machine from the latest finalized mainnet report.
+"""Serve the dashboard on this machine from the latest mined mainnet block.
 
 Run from the repository: python -m vyper_grant.server [--port 8787]
 
 One background thread owns the RPC client and rebuilds the report when
-finality advances. Requests only read the last good report, so pages load
+the head changes. Requests only read the last good report, so pages load
 instantly; a failing rebuild keeps that report and says so on the page.
 """
 
@@ -46,13 +46,15 @@ class State:
 
 
 def refresh_once(state, client, c):
-    """Rebuild the report if finality has advanced past the one being served."""
+    """Rebuild when the canonical head changes, including a reorg at the same height."""
     data, _, _ = state.snapshot()
     try:
-        finalized = client.eth.get_block("finalized")["number"]
-        if finalized <= int(data["block"]):
+        head = client.eth.get_block("latest")
+        if client.to_hex(head["hash"]) == data["block_hash"]:
+            with state.lock:
+                state.error = state.failing_since = None
             return False
-        fresh = report(client, c)
+        fresh = report(client, c, head=head)
     except Exception as error:
         message = describe(error)
         with state.lock:
@@ -63,7 +65,7 @@ def refresh_once(state, client, c):
         return False
     with state.lock:
         state.data, state.error, state.failing_since = fresh, None, None
-    print(f"Updated to finalized block {fresh['block']}", flush=True)
+    print(f"Updated to block {fresh['block']}", flush=True)
     return True
 
 
@@ -73,16 +75,16 @@ def refresh_forever(state, client, c):
         refresh_once(state, client, c)
 
 
-def current_page(state):
+def current_data(state):
     data, error, since = state.snapshot()
     if error:
         at = datetime.fromtimestamp(since, timezone.utc).strftime("%d %b %H:%M UTC")
         notice = (
             f"Mainnet refresh failing since {at} ({error}); "
-            f"showing finalized block {data['block']}."
+            f"showing block {data['block']}."
         )
         data = {**data, "warnings": [notice, *data.get("warnings", [])]}
-    return page(data)
+    return data
 
 
 def handler(state):
@@ -90,9 +92,9 @@ def handler(state):
         def do_GET(self):
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
-                body, kind = current_page(state).encode(), "text/html; charset=utf-8"
+                body, kind = page({**current_data(state), "live": True}).encode(), "text/html; charset=utf-8"
             elif path == "/report.json":
-                body = (json.dumps(state.snapshot()[0], indent=2) + "\n").encode()
+                body = (json.dumps(current_data(state), indent=2) + "\n").encode()
                 kind = "application/json"
             else:
                 self.send_error(404)
@@ -114,8 +116,8 @@ def main():
     args = p.parse_args()
     try:
         c, client = load_config(args.config), rpc()
-        print("Reading finalized mainnet state…", flush=True)
-        state = State(report(client, c))
+        print("Reading latest mainnet state…", flush=True)
+        state = State(report(client, c, head=client.eth.get_block("latest")))
     except Exception as error:
         print("Error: " + describe(error), file=sys.stderr)
         raise SystemExit(1)
@@ -125,7 +127,7 @@ def main():
         print(f"Error: cannot listen on {HOST}:{args.port} ({error.strerror})", file=sys.stderr)
         raise SystemExit(1)
     threading.Thread(target=refresh_forever, args=(state, client, c), daemon=True).start()
-    print(f"Serving http://{HOST}:{args.port} (finalized block {state.data['block']})", flush=True)
+    print(f"Serving http://{HOST}:{args.port} (block {state.data['block']})", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

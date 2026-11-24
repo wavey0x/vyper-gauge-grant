@@ -1,0 +1,16 @@
+handle /api/vyper-grant/* {
+	route {
+		handle /api/vyper-grant/report {
+			root * /var/lib/vyper-grant
+			rewrite * /report.json
+			header Access-Control-Allow-Origin "*"
+			header Cache-Control "public, max-age=15"
+			encode gzip
+			file_server
+		}
+		# Never expose anything else under the data directory.
+		handle {
+			respond 404
+		}
+	}
+}

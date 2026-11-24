@@ -137,7 +137,8 @@ def named(fn, block="latest"):
     return {o["name"]: v for o, v in zip(outputs, result)}
 
 
-def atomic_json(path, data):
+def atomic_json(path, data, mode=None):
+    """Replace `path` in one step. The file is owner-only unless `mode` is given."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix="." + path.name)
@@ -147,6 +148,8 @@ def atomic_json(path, data):
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
+        if mode is not None:
+            os.chmod(tmp, mode)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):

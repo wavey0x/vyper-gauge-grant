@@ -1,0 +1,21 @@
+[Unit]
+Description=Refresh the Vyper funding report
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=svc-vyper-grant
+Group=svc-vyper-grant
+WorkingDirectory=/opt/vyper-grant
+Environment=ETHEREUM_RPC_URL=http://127.0.0.1:8545
+StateDirectory=vyper-grant
+StateDirectoryMode=0755
+ExecStart=/opt/vyper-grant/.venv/bin/vyper-grant --config /opt/vyper-grant/config/mainnet.json --out /var/lib/vyper-grant report
+TimeoutStartSec=5min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/vyper-grant
+UMask=0022

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": "dashboard",
+  "rewrites": [
+    { "source": "/", "destination": "/template.html" },
+    { "source": "/report.json", "destination": "https://api.wavey.info/api/vyper-grant/report" }
+  ]
+}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the Vyper funding report every minute
+
+[Timer]
+OnCalendar=*:*:00
+AccuracySec=1s
+Persistent=true
+Unit=vyper-grant-report.service
+
+[Install]
+WantedBy=timers.target

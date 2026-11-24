@@ -1,4 +1,4 @@
-"""Deployment verification, historical recovery, and finalized event reports."""
+"""Deployment verification, historical recovery, and event reports."""
 
 from web3 import Web3
 from .core import ADDRESSES, WEEK, artifact, contract, named
@@ -63,11 +63,13 @@ def historical_vote(client, week, final):
     }
 
 
-def report(client, c):
-    final = client.eth.get_block("finalized")
-    block = final["number"]
+def report(client, c, *, head=None):
+    """Read everything at one block: the latest mined block unless `head` is given."""
+    if head is None:
+        head = client.eth.get_block("latest")
+    block = head["number"]
     if c.get("deployment_block") is None or not 0 <= c["deployment_block"] <= block:
-        raise ValueError("A finalized deployment_block is required")
+        raise ValueError("deployment_block must be within the report block range")
     funding, proceeds = [contract(client, n, c[n]) for n in ["funding", "proceeds"]]
     def read(fn):
         return fn.call(block_identifier=block)
@@ -95,7 +97,7 @@ def report(client, c):
     start = read(proceeds.functions.DEPLOYED_WEEK())
     rows = {
         week: dict(week=week, sold=0, output=0, yearn=0, vyper_crv=0)
-        for week in range(start, final["timestamp"] + 1, WEEK)
+        for week in range(start, head["timestamp"] + 1, WEEK)
     }
     forwarded = 0
     sales = events(proceeds.events.Sold())
@@ -119,7 +121,7 @@ def report(client, c):
     for week, row in rows.items():
         row.update(named(proceeds.functions.weeks(week), block))
         row["active"] = True
-        current = week <= final["timestamp"] < week + WEEK
+        current = week <= head["timestamp"] < week + WEEK
         missing = current and not row["ready"]
         row["status"] = (
             "Needs checkpoint"
@@ -138,9 +140,9 @@ def report(client, c):
     )
     shares = {week: row["share"] for week, row in rows.items()}
     data = dict(
-        as_of=final["timestamp"],
+        as_of=head["timestamp"],
         block=block,
-        block_hash=Web3.to_hex(final["hash"]),
+        block_hash=Web3.to_hex(head["hash"]),
         funding=funding.address,
         funding_recipient=read(funding.functions.recipient()),
         funding_next_week=read(funding.functions.next_week()),
@@ -178,7 +180,7 @@ def report(client, c):
         ),
         warnings=list(dict.fromkeys(warnings)),
     )
-    if client.eth.get_block(block)["hash"] != final["hash"]:
+    if client.eth.get_block(block)["hash"] != head["hash"]:
         raise ValueError("Source block reorganized; rerun")
     return serialize(data)
 

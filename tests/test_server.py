@@ -4,11 +4,13 @@ import urllib.error
 import urllib.request
 
 import pytest
+from web3 import Web3
 
 from vyper_grant import server
 
 DATA = {
     "block": "100",
+    "block_hash": Web3.to_hex((100).to_bytes(32, "big")),
     "as_of": "1795475159",
     "warnings": ["Sales are paused; public checkpoint remains available"],
     "weeks": [],
@@ -17,15 +19,15 @@ DATA = {
 
 
 class Client:
-    """Only the finalized block number is read outside report()."""
+    to_hex = staticmethod(Web3.to_hex)
 
-    def __init__(self, finalized):
+    def __init__(self, number, hash_value=None):
         self.eth = self
-        self.finalized = finalized
+        self.head = {"number": number, "hash": (hash_value or number).to_bytes(32, "big")}
 
     def get_block(self, tag):
-        assert tag == "finalized"
-        return {"number": self.finalized}
+        assert tag == "latest"
+        return self.head
 
 
 @pytest.fixture
@@ -61,24 +63,21 @@ def test_other_paths_are_not_found(served):
     assert missing.value.code == 404
 
 
-def test_rebuilds_only_when_finality_advances(monkeypatch):
-    built = []
-
-    def build(client, c):
-        built.append(client.finalized)
-        return {**DATA, "block": str(client.finalized)}
+@pytest.mark.parametrize(("number", "hash_value"), [(101, 101), (100, 200), (99, 99)])
+def test_publishes_new_and_reorganized_heads(monkeypatch, number, hash_value):
+    def build(client, c, *, head):
+        assert head is client.head
+        return {**DATA, "block": str(head["number"]), "block_hash": Web3.to_hex(head["hash"])}
 
     monkeypatch.setattr(server, "report", build)
     state = server.State(dict(DATA))
     assert server.refresh_once(state, Client(100), {}) is False
-    assert built == []
-    assert server.refresh_once(state, Client(101), {}) is True
-    assert built == [101]
-    assert state.snapshot()[0]["block"] == "101"
+    assert server.refresh_once(state, Client(number, hash_value), {}) is True
+    assert state.snapshot()[0]["block_hash"] == Web3.to_hex(hash_value.to_bytes(32, "big"))
 
 
 def test_failed_rebuild_keeps_the_last_report_and_says_so(monkeypatch):
-    def broken(client, c):
+    def broken(client, c, *, head):
         raise ConnectionError("https://rpc.example/secret-key timed out")
 
     monkeypatch.setattr(server, "report", broken)
@@ -87,11 +86,10 @@ def test_failed_rebuild_keeps_the_last_report_and_says_so(monkeypatch):
     data, error, _ = state.snapshot()
     assert data == DATA
     assert error == "ConnectionError"
-    html = server.current_page(state)
+    html = server.page(server.current_data(state))
     assert "Mainnet refresh failing since" in html
-    assert "(ConnectionError); showing finalized block 100." in html
+    assert "(ConnectionError); showing block 100." in html
     assert "secret-key" not in html
 
-    monkeypatch.setattr(server, "report", lambda client, c: {**DATA, "block": "102"})
-    assert server.refresh_once(state, Client(102), {}) is True
-    assert "Mainnet refresh failing" not in server.current_page(state)
+    assert server.refresh_once(state, Client(100), {}) is False
+    assert "Mainnet refresh failing" not in server.page(server.current_data(state))

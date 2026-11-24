@@ -7,7 +7,7 @@ Two independent Vyper contracts on Ethereum:
 
 The manager is `0x4444AAAACDBa5580282365e25b16309Bd770ce4a`. It manages keepers, the Yearn proceeds receiver, pauses sales and can withdraw any ERC20 except CRV held by ProceedsEscrow to a chosen recipient. **ychad.eth** (`0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52`) can independently claw back any ERC20 held by FundingEscrow to itself, and withdraw any ERC20 except CRV held by ProceedsEscrow to a chosen recipient, at any time. Only the Vyper multisig can withdraw proceeds escrow CRV. Neither contract calls or knows the other. Public `checkpoint()` freezes the current week's vote share and remains usable while paused. Sales checkpoint automatically. There is no emissions reconstruction or reserve counter.
 
-The [dashboard](dashboard/demo/index.html) has two balances, weekly proceeds and an expandable list of dated funding payments. Its [preview](dashboard/preview.png) uses illustrative data. See [accounting](docs/accounting.md) and [verification](docs/verification.md).
+The [dashboard](dashboard/demo/index.html) has the funding, proceeds and Vyper CRV balances, weekly proceeds, a transaction list and both escrow addresses. Its [preview](dashboard/preview.png) uses illustrative data. See [accounting](docs/accounting.md) and [verification](docs/verification.md).
 
 ## Ethereum mainnet deployment
 
@@ -128,7 +128,7 @@ The contract claims pending rewards and pulls `min(receiver_balance, max_crv)`. 
 
 Schedule `ops/run.sh` every five minutes with `VYPER_GRANT_DIR` and `ETHEREUM_RPC_URL` set externally. The keeper checks `canWork()` before quoting; while waiting it can still capture a missing weekly snapshot. `ops/run.sh checkpoint` requests only a snapshot. Set `KEEPER_SEND=1` and `KEEPER_PRIVATE_KEY` for the dedicated signer. Nothing is scheduled by this repository. Configure the normal minimum trade, slippage and gas limit. Closing sales bypass the minimum trade threshold in each week's final five minutes, but still respect the batch cap. Drain any substantial backlog ahead of that window. Plan earlier sales so the cooldown expires in that window; a sale too early in the window can prevent another attempt closer to the boundary. All calls respect the cooldown and gas limit. Swaps require a positive quoted minimum; retention without a swap uses zero. A pending sale may land after the boundary and use the new split; its nonce can block later submissions until it is mined or manually replaced. If the closing sale misses the boundary, reconcile rather than assuming the next week's sale preserves the previous share. Stop automation and hand claims back to Vyper after the final cleanup.
 
-Run `ops/run.sh funding-keeper` on the same polling schedule for funding payments; it needs no proceeds address or keeper authorization. The default `ops/run.sh` continues to operate proceeds only. Use one host/signer and a shared output directory for the process lock. A pending nonce prevents another submission. After a response is lost, the next pass reads fresh claimable rewards; there is no signed-transaction journal or automatic fee replacement. Reports use finalized blocks and intentionally lag execution.
+Run `ops/run.sh funding-keeper` on the same polling schedule for funding payments; it needs no proceeds address or keeper authorization. The default `ops/run.sh` continues to operate proceeds only. Use one host/signer and a shared output directory for the process lock. A pending nonce prevents another submission. After a response is lost, the next pass reads fresh claimable rewards; there is no signed-transaction journal or automatic fee replacement. Reports read the latest mined block.
 
 `set-recipient --account ADDRESS` changes the recipient of all unpaid funding instalments, including the current round. `set-keeper --account ADDRESS [--disable]`, `set-paused true|false`, and `set-cooldown --seconds INTEGER` (at least 600) manage sales. Cooldown changes apply immediately relative to the last successful sale. `set-yearn-receiver --account ADDRESS` prepares a manager batch to route future Yearn shares there. Use the proceeds contract's own address to resume accumulation. Zero is rejected; existing balances stay where they are.
 
@@ -137,3 +137,34 @@ Run `ops/run.sh funding-keeper` on the same polling schedule for funding payment
 `recover funding --token ADDRESS --amount-raw INTEGER` prepares a funding recovery to the manager; add `--governance` for a **ychad.eth** clawback to governance. Recover yvUSDC-1 shares directly to avoid relying on vault redemption. Recovering vault shares also cancels pending funding payments. Recovery is independent of the seller and the vault's withdrawal availability; it does not reverse payments already made. The governance address is pinned to its ENS resolution verified on November 10, 2026, not resolved dynamically by the contract.
 
 Funding amounts use 6-decimal USDC; proceeds quotes, minimums, balances and allocations also use 6-decimal USDC. The quote command returns `usdc`, keeper output uses `min_usdc`, and reports use `forwarded_usdc` / `withdrawn_usdc`.
+
+## Dashboard
+
+The dashboard is one page, [`dashboard/template.html`](dashboard/template.html), with no build step or external scripts. It shows a report from `vyper-grant report`, which reads every value at the latest mined block and rechecks that block's hash before writing.
+
+```sh
+uv run python -m vyper_grant.server             # live page at http://127.0.0.1:8787
+uv run vyper-grant --out dashboard/dist report  # static index.html plus report.json
+uv run vyper-grant --out dashboard/demo report --input dashboard/demo/report.json
+```
+
+The local server listens on loopback only and rebuilds the report when the head changes, checked every minute. A page served by it, or one with no report embedded, loads `report.json` from beside itself and polls it every ten seconds while the tab is visible. The header shows the report's age and turns amber once the block is ten minutes old. Pages written by `report` embed their data and do not poll. The last command regenerates the demo.
+
+Hosting follows the stYFI dashboard: static files on Vercel and a collector on Electro. Neither is set up by this repository.
+
+- **Page:** [`vercel.json`](vercel.json) publishes `dashboard/`, serves the template at `/` and forwards `/report.json` to `https://api.wavey.info/api/vyper-grant/report`.
+- **Collector:** [`deploy/systemd`](deploy/systemd) runs `vyper-grant report` every minute as `svc-vyper-grant` against Electro's loopback node. It replaces `/var/lib/vyper-grant/report.json` atomically with mode 0644; a failed run leaves the previous file in place. Each run rescans events from `deployment_block`, so runs lengthen as the chain grows.
+- **Route:** [`deploy/caddy/vyper-grant.caddy`](deploy/caddy/vyper-grant.caddy), imported by the `api.wavey.info` site, serves only that file.
+
+Code and venv live in `/opt/vyper-grant`, root-owned and readable by `svc-vyper-grant`; install the package into the venv without the `dev` extra. The unit reads [`config/mainnet.json`](config/mainnet.json).
+
+```sh
+sudo install -m 644 deploy/systemd/vyper-grant-report.service deploy/systemd/vyper-grant-report.timer /etc/systemd/system/
+sudo install -m 644 deploy/caddy/vyper-grant.caddy /etc/caddy/vyper-grant.caddy
+sudo systemctl daemon-reload
+sudo systemctl start vyper-grant-report.service
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+sudo systemctl enable --now vyper-grant-report.timer
+sudo journalctl -u vyper-grant-report.service -n 30
+```

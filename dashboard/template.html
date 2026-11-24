@@ -2,42 +2,119 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Vyper funding</title>
+<script>
+// Before first paint, so the saved or system theme never flashes.
+(() => {
+  let theme;
+  try { theme = localStorage.getItem('theme'); } catch {}
+  if (theme !== 'light' && theme !== 'dark') theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  document.documentElement.dataset.theme = theme;
+})();
+</script>
 <style>
-:root{color-scheme:light;font:14px/1.45 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#192521;background:#fafbf8}
-*{box-sizing:border-box}body{margin:0}main{max-width:880px;margin:40px auto;padding:0 24px}
-header{display:flex;justify-content:space-between;align-items:baseline;gap:16px}
-h1{font-size:20px;font-weight:600;letter-spacing:-.3px;margin:0}h2{font-size:12px;font-weight:500;color:#66746c;margin:0}
-.muted{color:#66746c;font-size:12px}.notice{font-size:12px;color:#7c592d;margin:12px 0 0}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin:28px 0 8px}
-.value{font-size:26px;letter-spacing:-.8px;font-variant-numeric:tabular-nums;margin-top:2px}.unit{font-size:12px;letter-spacing:0;color:#66746c;margin-left:5px}
-.sub{font-size:12px;color:#66746c;margin:4px 0 0;display:flex;gap:8px;align-items:center;min-height:24px}.sub:empty{display:none}
-section{margin-top:28px}.scroll{overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;margin-top:6px}
-th{text-align:right;color:#66746c;font-weight:400;font-size:12px;padding:6px 0;border-bottom:1px solid #dfe6dc;white-space:nowrap}
-td{text-align:right;padding:7px 0;border-bottom:1px solid #eef1ea;white-space:nowrap}
-th+th,td+td{padding-left:16px}th:first-child,td:first-child,#activity th:nth-child(2),#activity td:nth-child(2){text-align:left}
-a{color:inherit;text-decoration:none;border-bottom:1px solid #cbd5c7}a:hover{border-color:#192521}
-button{font:inherit;font-size:12px;padding:3px 10px;border:1px solid #cbd5c7;border-radius:6px;background:#fff;color:#192521;cursor:pointer}
-button.primary{background:#192521;border-color:#192521;color:#fff}button:disabled{opacity:.5;cursor:default}
-footer{display:flex;gap:16px;margin-top:24px}
-@media(max-width:600px){main{margin:24px auto;padding:0 16px}.stats{grid-template-columns:1fr;gap:14px}td,th{font-size:12px}}
+:root{
+  --sans:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --bg:#fafbf8;--surface:#fff;--hover:#f4f6f1;--ink:#192521;--muted:#66746c;--faint:#9aa69e;
+  --border:#dfe6dc;--soft:#eef1ea;--strong:#cbd5c7;--live:#2a9d6a;--warn:#8a6420;
+  --card:0 0 0 1px #1925210a,0 1px 2px #1925210a,0 6px 20px -10px #19252117;
+  color-scheme:light;font:13px/1.45 var(--sans);color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased
+}
+:root[data-theme=dark]{
+  --bg:#0f1210;--surface:#161a17;--hover:#1c211e;--ink:#edf1ed;--muted:#97a39c;--faint:#626d66;
+  --border:#262c28;--soft:#1e2320;--strong:#3a423d;--live:#58cf98;--warn:#e0ae55;
+  --card:inset 0 1px 0 #ffffff0d,0 1px 2px #00000080,0 14px 34px -18px #000000e6;
+  color-scheme:dark
+}
+*{box-sizing:border-box}[hidden]{display:none!important}html{overflow-y:scroll}body{margin:0}
+a{color:inherit;text-decoration:none}button{font:inherit;color:inherit;cursor:pointer}
+a:focus-visible,button:focus-visible{outline:2px solid var(--muted);outline-offset:2px}
+svg{display:block;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+
+.topbar{position:sticky;top:0;z-index:10;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:saturate(1.4) blur(10px);-webkit-backdrop-filter:saturate(1.4) blur(10px)}
+.bar,main{max-width:960px;margin:0 auto;padding:0 24px}
+.bar{display:flex;align-items:center;gap:10px;height:52px}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto;font-size:14px;line-height:1}
+.brand-name{font-weight:600;letter-spacing:-.35px}.brand-sub{color:var(--muted)}
+.brand-sep{width:1px;height:14px;background:var(--strong);transform:rotate(14deg)}
+.freshness{display:flex;align-items:center;gap:7px;margin:0;font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.dot{position:relative;width:6px;height:6px;border-radius:50%;background:var(--live)}
+.dot::after{content:"";position:absolute;inset:-3px;border-radius:50%;background:var(--live);opacity:0;animation:pulse 2.8s ease-out infinite}
+@keyframes pulse{0%{transform:scale(.6);opacity:.45}70%,100%{transform:scale(1.9);opacity:0}}
+.freshness.stale{color:var(--warn)}.freshness.stale .dot{background:var(--faint)}
+.freshness.stale .dot::after,.freshness.static .dot{display:none}
+.act{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:4px;background:none;color:var(--muted);vertical-align:middle;transition:color .12s,background .12s,opacity .12s}
+.act:hover,.act:focus-visible{color:var(--ink)}
+#theme{width:30px;height:30px}#theme:hover{background:var(--hover)}
+.sun,:root[data-theme=dark] .moon{display:none}:root[data-theme=dark] .sun{display:block}
+
+main{padding-top:20px;padding-bottom:48px}
+.notice{margin:0 0 10px;font-size:12px;color:var(--warn)}
+.card{border-radius:8px;background:var(--surface);box-shadow:var(--card)}
+.overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:0;padding:16px 0}
+.stat{min-width:0;padding:0 20px}.stat+.stat{border-left:1px solid var(--soft)}
+.stat strong{display:block;font:500 20px/26px var(--mono);letter-spacing:-.4px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.unit{margin-left:5px;font:11px var(--sans);letter-spacing:0;color:var(--muted)}
+.label{display:block;margin-top:1px;font-size:11px;color:var(--muted)}
+.sub{display:flex;align-items:center;gap:8px;min-height:24px;margin:8px 0 0;font-size:12px;color:var(--muted)}.sub:empty{display:none}
+.button{padding:3px 10px;border:1px solid var(--strong);border-radius:6px;background:var(--surface);font-size:12px}
+.button.primary{border-color:var(--ink);background:var(--ink);color:var(--bg)}.button:disabled{opacity:.5;cursor:default}
+
+section{margin-top:22px}h2{margin:0 0 8px 2px;font-size:13px;font-weight:600}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;white-space:nowrap}
+th{padding:10px 8px 9px;border-bottom:1px solid var(--border);text-align:right;font-size:11px;font-weight:500;color:var(--muted)}
+td{height:38px;padding:6px 8px;border-bottom:1px solid var(--soft);text-align:right;font:12px var(--mono);font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{padding-left:16px}th:last-child,td:last-child{padding-right:16px}
+th:first-child,td:first-child,.text{text-align:left}td:first-child,td.text{font-family:var(--sans)}
+tbody tr{transition:background .12s}tbody tr:hover{background:var(--hover)}tbody tr:last-child td{border-bottom:0}
+td.empty{color:var(--faint)}td .unit{margin-left:4px}
+td.link{padding:0 12px 0 0}
+/* Address actions stay out of the way until the row is hovered or focused. */
+.address{display:inline-flex;align-items:center;gap:2px;font:12px var(--mono)}.address .act{opacity:0}
+.address .full,.address .short{margin-right:4px}.short{display:none}
+tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
+.check,.act.copied .copy{display:none}.act.copied .check{display:block}.act.copied{color:var(--live)}
+@media(hover:none){.address .act{opacity:1}}
+/* Shared column widths line Yearn and Vyper up across the tables. */
+@media(min-width:960px){table{table-layout:fixed}.c-date{width:17%}.c-num{width:15%}.c-wide{width:31%}.c-link{width:44px}}
+@media(max-width:600px){.bar,main{padding-left:16px;padding-right:16px}.overview{grid-template-columns:1fr;padding:4px 0}.stat{padding:12px 16px}.stat+.stat{border-left:0;border-top:1px solid var(--soft)}.full{display:none}.short{display:inline}.address .act{opacity:1}}
+@media(prefers-reduced-motion:reduce){.dot::after{animation:none}}
 </style>
+<header class="topbar"><div class="bar">
+<div class="brand"><span class="brand-name">Vyper</span><span class="brand-sep" aria-hidden="true"></span><span class="brand-sub">funding</span></div>
+<p class="freshness" id="freshness" hidden><span class="dot" aria-hidden="true"></span><span id="updated"></span></p>
+<button class="act" id="theme" type="button" aria-label="Switch color theme" title="Switch color theme">
+<svg class="moon" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1Z"/></svg>
+<svg class="sun" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>
+</button>
+</div></header>
 <main>
-<header><h1>Vyper funding</h1><span class="muted" id="updated"></span></header>
+<h1 class="visually-hidden">Vyper funding</h1>
 <p class="notice" id="demo" hidden>Illustrative data</p>
 <div id="notices" role="status"></div>
-<section class="stats" aria-label="Balances">
-<div><h2>Funding</h2><div class="value"><span id="funding">—</span><span class="unit">USDC</span></div><p class="sub" id="next"></p></div>
-<div><h2>Proceeds</h2><div class="value"><span id="proceeds">—</span><span class="unit">USDC</span></div></div>
-<div><h2>Vyper CRV</h2><div class="value"><span id="vyper-crv">—</span><span class="unit">CRV</span></div><p class="sub"><button id="claim" type="button" hidden>Connect</button><span id="claim-status"></span></p></div>
+<section class="overview card" aria-label="Balances">
+<div class="stat"><strong><span id="funding">—</span><span class="unit">USDC</span></strong><span class="label">Funding</span><p class="sub" id="next"></p></div>
+<div class="stat"><strong><span id="proceeds">—</span><span class="unit">USDC</span></strong><span class="label">Proceeds</span></div>
+<div class="stat"><strong><span id="vyper-crv">—</span><span class="unit">CRV</span></strong><span class="label">Vyper CRV</span><p class="sub" id="claim-row" hidden><button class="button" id="claim" type="button">Connect</button><span id="claim-status"></span></p></div>
 </section>
-<section id="weekly" hidden><h2>Weeks</h2><div class="scroll"><table><thead><tr><th scope="col">Week</th><th scope="col">Yearn share</th><th scope="col">Yearn</th><th scope="col">Vyper</th></tr></thead><tbody id="weeks"></tbody></table></div></section>
-<section id="activity" hidden><h2>Transactions</h2><div class="scroll"><table><thead><tr><th scope="col">UTC</th><th scope="col">Action</th><th scope="col">CRV</th><th scope="col">Yearn</th><th scope="col">Vyper</th></tr></thead><tbody id="transactions"></tbody></table></div></section>
-<footer class="muted" id="links"><a href="report.json">Data</a></footer>
+<section id="weekly" hidden><h2>Weeks</h2><div class="card scroll"><table><thead><tr><th scope="col">Week</th><th scope="col" class="c-num">Yearn share</th><th scope="col" class="c-num">Yearn</th><th scope="col" class="c-wide">Vyper</th><th class="c-link"></th></tr></thead><tbody id="weeks"></tbody></table></div></section>
+<section id="activity" hidden><h2>Transactions</h2><div class="card scroll"><table><thead><tr><th scope="col" class="c-date">UTC</th><th scope="col" class="text">Action</th><th scope="col" class="c-num">CRV</th><th scope="col" class="c-num">Yearn</th><th scope="col" class="c-wide">Vyper</th><th scope="col" class="c-link"><span class="visually-hidden">Transaction</span></th></tr></thead><tbody id="transactions"></tbody></table></div></section>
+<section id="contracts" hidden><h2>Contracts</h2><div class="card scroll"><table><thead><tr><th scope="col" class="c-date">Contract</th><th scope="col" class="text">Address</th></tr></thead><tbody id="addresses"></tbody></table></div></section>
 </main>
+<template id="icon-link"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M5.2 10.8 10.8 5.2M6.2 5.2h4.6v4.6"/></svg></template>
+<template id="icon-copy"><svg class="copy" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="6" y="2.5" width="7" height="9" rx="1.5"/><path d="M6 5.5H4.5A1.5 1.5 0 0 0 3 7v6a1.5 1.5 0 0 0 1.5 1.5h4A1.5 1.5 0 0 0 10 13v-1.5"/></svg></template>
+<template id="icon-check"><svg class="check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg></template>
 <script>
-const report=/*REPORT_DATA*/{};
+let report=/*REPORT_DATA*/{};
+// A page with no embedded report is the hosted one: it loads report.json and keeps polling.
+const live = Boolean(report.live) || !Object.keys(report).length;
+const POLL_MS = 10_000, STALE_MINUTES = 10;
+let failed = false;
+
 const el = id => document.getElementById(id);
 const big = x => BigInt(x ?? 0);
 const amount = (x, d) => {
@@ -49,79 +126,154 @@ const pct = basis => amount(basis, 2) + '%';
 const day = ts => new Date(Number(ts) * 1000).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', timeZone: 'UTC'});
 const when = ts => day(ts) + ' ' + new Date(Number(ts) * 1000).toISOString().slice(11, 16);
 const short = a => a.slice(0, 6) + '…' + a.slice(-4);
+const span = (name, text) => {
+  const s = document.createElement('span');
+  s.className = name;
+  s.textContent = text;
+  return s;
+};
+const icon = name => el('icon-' + name).content.firstElementChild.cloneNode(true);
+const label = (node, text) => {
+  node.title = text;
+  node.setAttribute('aria-label', text);
+  return node;
+};
+const etherscan = (path, text) => {
+  const a = label(document.createElement('a'), text);
+  a.className = 'act';
+  a.href = 'https://etherscan.io/' + path;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.append(icon('link'));
+  return a;
+};
+const address = value => {
+  const cell = span('address', '');
+  cell.append(span('full', value), span('short', short(value)));
+  if (navigator.clipboard) {
+    const copy = label(document.createElement('button'), 'Copy address');
+    copy.type = 'button';
+    copy.className = 'act';
+    copy.append(icon('copy'), icon('check'));
+    copy.onclick = async () => {
+      await navigator.clipboard.writeText(value);
+      copy.classList.add('copied');
+      setTimeout(() => copy.classList.remove('copied'), 1200);
+    };
+    cell.append(copy);
+  }
+  cell.append(etherscan('address/' + value, 'View on Etherscan'));
+  return cell;
+};
 const split = (usdc, crv) => {
   const parts = [];
-  if (big(usdc) > 0n) parts.push(amount(usdc, 6) + ' USDC');
-  if (big(crv) > 0n) parts.push(amount(crv, 18) + ' CRV');
-  return parts.join(' + ') || '—';
-};
-const row = (body, values) => {
-  const tr = document.createElement('tr');
-  for (const value of values) {
-    const td = document.createElement('td');
-    td.append(value);
-    tr.append(td);
+  for (const [x, d, unit] of [[usdc, 6, 'USDC'], [crv, 18, 'CRV']]) {
+    if (big(x) <= 0n) continue;
+    if (parts.length) parts.push(' + ');
+    parts.push(amount(x, d), span('unit', unit));
   }
+  return parts.length ? parts : '—';
+};
+// A cell is text, a node or a list of both; `classes` names cells by position.
+const row = (body, values, classes = {}) => {
+  const tr = document.createElement('tr');
+  values.forEach((value, i) => {
+    const td = document.createElement('td');
+    td.append(...[value].flat());
+    td.className = classes[i] ?? (value === '—' ? 'empty' : '');
+    tr.append(td);
+  });
   el(body).append(tr);
 };
 
-if (report.demo) el('demo').hidden = false;
-if (report.as_of) el('updated').textContent = 'Updated ' + when(report.as_of) + ' UTC';
-for (const warning of report.warnings ?? []) {
-  const p = document.createElement('p');
-  p.className = 'notice';
-  p.textContent = warning;
-  el('notices').append(p);
-}
-if (report.funding_assets != null) {
-  el('funding').textContent = amount(report.funding_assets, 6);
-  el('proceeds').textContent = amount(report.proceeds_balance, 6);
-  el('vyper-crv').textContent = amount(report.vyper_crv_balance, 18);
-}
-if (big(report.funding_next_week) > 0n) {
-  el('next').textContent = 'Next ' + amount(report.funding_payments?.[0], 6) + ' · ' + day(report.funding_next_week);
-}
-
-for (const week of [...report.weeks ?? []].reverse()) {
-  row('weeks', [
-    day(week.week),
-    week.ready ? pct(bps(week.share)) : '—',
-    split(week.yearn, 0),
-    split(big(week.output) - big(week.yearn), week.vyper_crv),
-  ]);
-}
-el('weekly').hidden = !(report.weeks ?? []).length;
-
-for (const t of report.transactions ?? []) {
-  if (!/^0x[0-9a-fA-F]{64}$/.test(t.tx ?? '')) continue;
-  const link = document.createElement('a');
-  link.href = 'https://etherscan.io/tx/' + t.tx;
-  link.textContent = when(t.timestamp);
-  if (t.kind === 'work') {
-    row('transactions', [link, 'Work', amount(t.crv, 18), split(t.yearn_usdc, 0), split(t.vyper_usdc, t.vyper_crv)]);
-  } else if (t.kind === 'checkpoint') {
-    const yearn = bps(t.share);
-    row('transactions', [link, t.manual ? 'Manual weight' : 'Checkpoint', '—', pct(yearn), pct(10000n - yearn)]);
-  } else if (t.kind === 'payment') {
-    row('transactions', [link, 'Payment', '—', '—', split(t.usdc, 0)]);
+function renderFreshness() {
+  const box = el('freshness');
+  box.hidden = !report.as_of && !failed;
+  if (!report.as_of) {
+    box.className = 'freshness stale';
+    el('updated').textContent = 'Not updating';
+    return;
   }
+  const exact = when(report.as_of) + ' UTC';
+  if (!live) {
+    box.className = 'freshness static';
+    el('updated').textContent = 'Updated ' + exact;
+    return;
+  }
+  const minutes = Math.floor((Date.now() / 1000 - Number(report.as_of)) / 60);
+  box.className = 'freshness' + (minutes >= STALE_MINUTES ? ' stale' : '');
+  box.title = exact;
+  el('updated').textContent = 'Updated ' + (
+    minutes < 1 ? 'just now' :
+    minutes < 60 ? minutes + 'm ago' :
+    minutes < 48 * 60 ? Math.floor(minutes / 60) + 'h ago' : day(report.as_of));
 }
-el('activity').hidden = !el('transactions').children.length;
 
-for (const [key, label] of [['funding', 'Funding'], ['proceeds', 'Proceeds']]) {
-  if (!/^0x[0-9a-fA-F]{40}$/.test(report[key] ?? '')) continue;
-  const a = document.createElement('a');
-  a.href = 'https://etherscan.io/address/' + report[key];
-  a.textContent = label;
-  el('links').append(a);
+function renderReport() {
+  for (const id of ['notices', 'weeks', 'transactions', 'addresses']) el(id).replaceChildren();
+  el('demo').hidden = !report.demo;
+  renderFreshness();
+  for (const warning of report.warnings ?? []) {
+    const p = document.createElement('p');
+    p.className = 'notice';
+    p.textContent = warning;
+    el('notices').append(p);
+  }
+  if (report.funding_assets != null) {
+    el('funding').textContent = amount(report.funding_assets, 6);
+    el('proceeds').textContent = amount(report.proceeds_balance, 6);
+    el('vyper-crv').textContent = amount(report.vyper_crv_balance, 18);
+  }
+  el('next').textContent = '';
+  if (big(report.funding_next_week) > 0n) {
+    el('next').textContent = 'Next ' + amount(report.funding_payments?.[0], 6) + ' · ' + day(report.funding_next_week);
+  }
+
+  for (const week of [...report.weeks ?? []].reverse()) {
+    row('weeks', [
+      day(week.week),
+      week.ready ? pct(bps(week.share)) : '—',
+      split(week.yearn, 0),
+      split(big(week.output) - big(week.yearn), week.vyper_crv),
+      '',
+    ]);
+  }
+  el('weekly').hidden = !(report.weeks ?? []).length;
+
+  const cells = {1: 'text', 5: 'link'};
+  for (const t of report.transactions ?? []) {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(t.tx ?? '')) continue;
+    const date = when(t.timestamp), link = etherscan('tx/' + t.tx, 'View transaction on Etherscan');
+    if (t.kind === 'work') {
+      row('transactions', [date, 'Work', amount(t.crv, 18), split(t.yearn_usdc, 0), split(t.vyper_usdc, t.vyper_crv), link], cells);
+    } else if (t.kind === 'checkpoint') {
+      const yearn = bps(t.share);
+      row('transactions', [date, t.manual ? 'Manual weight' : 'Checkpoint', '—', pct(yearn), pct(10000n - yearn), link], cells);
+    } else if (t.kind === 'payment') {
+      row('transactions', [date, 'Payment', '—', '—', split(t.usdc, 0), link], cells);
+    }
+  }
+  el('activity').hidden = !el('transactions').children.length;
+
+  for (const [key, name] of [['funding', 'Funding escrow'], ['proceeds', 'Proceeds escrow']]) {
+    if (/^0x[0-9a-fA-F]{40}$/.test(report[key] ?? '')) row('addresses', [name, address(report[key])], {1: 'text'});
+  }
+  el('contracts').hidden = !el('addresses').children.length;
+  el('claim-row').hidden = !report.vyper_crv_claim || big(report.vyper_crv_balance) === 0n;
 }
+renderReport();
+
+el('theme').onclick = () => {
+  const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('theme', theme); } catch {}
+};
 
 // Only the Vyper Safe may withdraw escrow CRV, so the wallet must act as that Safe.
-const claim = report.vyper_crv_claim;
 const button = el('claim');
 const status = message => { el('claim-status').textContent = message; };
 let account = null;
-const isSafe = () => account?.toLowerCase() === claim.safe.toLowerCase();
+const isSafe = () => Boolean(account && account.toLowerCase() === report.vyper_crv_claim?.safe.toLowerCase());
 const show = () => {
   button.textContent = isSafe() ? 'Claim' : 'Connect';
   button.classList.toggle('primary', isSafe());
@@ -136,29 +288,60 @@ const mainnet = async () => {
   }
   return wallet;
 };
-if (claim && big(report.vyper_crv_balance) > 0n) {
-  button.hidden = false;
-  window.ethereum?.on?.('accountsChanged', accounts => { account = accounts[0] ?? null; show(); });
-  button.onclick = async () => {
-    button.disabled = true;
+window.ethereum?.on?.('accountsChanged', accounts => { account = accounts[0] ?? null; show(); });
+button.onclick = async () => {
+  button.disabled = true;
+  try {
+    const wallet = await mainnet();
+    if (!isSafe()) {
+      [account] = await wallet.request({method: 'eth_requestAccounts'});
+      show();
+    } else {
+      const claim = report.vyper_crv_claim;
+      const hash = await wallet.request({
+        method: 'eth_sendTransaction',
+        params: [{from: claim.safe, to: claim.to, data: claim.data, value: '0x0'}],
+      });
+      status('Submitted ' + short(hash));
+    }
+  } catch (error) {
+    status(error?.message ?? String(error));
+  } finally {
+    button.disabled = false;
+  }
+};
+
+if (live) {
+  let busy = false, timer;
+  // Hidden tabs skip the request; the label still ages so a stale page says so.
+  async function refresh() {
+    if (busy) return;
+    busy = true;
+    clearTimeout(timer);
     try {
-      const wallet = await mainnet();
-      if (!isSafe()) {
-        [account] = await wallet.request({method: 'eth_requestAccounts'});
-        show();
-      } else {
-        const hash = await wallet.request({
-          method: 'eth_sendTransaction',
-          params: [{from: claim.safe, to: claim.to, data: claim.data, value: '0x0'}],
-        });
-        status('Submitted ' + short(hash));
+      if (!document.hidden) {
+        const response = await fetch('report.json', {cache: 'no-store'});
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const next = await response.json();
+        failed = false;
+        if (next.block_hash !== report.block_hash ||
+            JSON.stringify(next.warnings) !== JSON.stringify(report.warnings)) {
+          report = next;
+          renderReport();
+        }
       }
     } catch (error) {
-      status(error?.message ?? String(error));
+      failed = true;
+      console.warn('Dashboard refresh failed', error);
     } finally {
-      button.disabled = false;
+      busy = false;
+      renderFreshness();
+      timer = setTimeout(refresh, POLL_MS);
     }
-  };
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+  if (report.as_of) timer = setTimeout(refresh, POLL_MS);
+  else refresh();
 }
 </script>
 </html>

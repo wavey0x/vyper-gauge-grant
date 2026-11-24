@@ -21,4 +21,5 @@ def render(data, out):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(page(data))
-    atomic_json(out / "report.json", data)
+    # World-readable: on the server a web server under another user serves this file.
+    atomic_json(out / "report.json", data, mode=0o644)
