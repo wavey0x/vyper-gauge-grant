@@ -111,7 +111,7 @@ td.link{padding:0 12px 0 0}
 tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 .check,.act.copied .copy{display:none}.act.copied .check{display:block}.act.copied{color:var(--live)}
 @media(hover:none){.address .act{opacity:1}}
-@media(min-width:960px){table{table-layout:fixed}.c-date{width:17%}.c-hold{width:32%}.c-link{width:44px}.h-age{width:12%}.h-num{width:14%}.h-paid{width:27%}.w-vote{width:7.5%}.w-share{width:8%}.w-claim{width:13%}.w-paid{width:12%}.w-eff{width:9%}.w-wide{width:20%}}
+@media(min-width:960px){table{table-layout:fixed}.c-date{width:17%}.c-hold{width:32%}.c-link{width:44px}.h-age{width:12%}.h-num{width:14%}.h-paid{width:27%}.w-vote{width:7.5%}.w-share{width:8%}.w-claim{width:13%}.w-paid{width:12%}.w-eff{width:11%}}
 @media(max-width:600px){.bar,main{padding-left:16px;padding-right:16px}.full{display:none}.short{display:inline}.address .act{opacity:1}
   .figure strong{font-size:19px;line-height:26px}.figure+.figure{padding-left:14px}.chart .figure .unit{font-size:0}
   .figures.three{grid-template-columns:1fr 1fr;gap:10px 0}.figures.three .figure:nth-child(3){grid-column:1/-1;display:flex;align-items:baseline;gap:8px;padding:10px 0 0;border-left:0;border-top:1px solid var(--soft)}.figures.three .figure:nth-child(3) .label{margin:0}
@@ -161,8 +161,8 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 <div id="bars"></div>
 </div>
 <div class="card scroll stack"><table><thead>
-<tr class="groups"><th></th><th colspan="3">Votes · veCRV</th><th></th><th colspan="3">Yearn</th><th></th></tr>
-<tr><th scope="col">Week</th><th scope="col" class="w-vote">Yearn</th><th scope="col" class="w-vote">Non-Yearn</th><th scope="col" class="w-share">Share</th><th scope="col" class="w-claim">Claimed</th><th scope="col" class="w-paid">Paid</th><th scope="col" class="w-paid">Proceeds</th><th scope="col" class="w-eff">Efficiency</th><th scope="col" class="w-wide">Vyper</th></tr>
+<tr class="groups"><th></th><th colspan="3">Votes · veCRV</th><th></th><th colspan="3">Yearn</th></tr>
+<tr><th scope="col">Week</th><th scope="col" class="w-vote">Yearn</th><th scope="col" class="w-vote">Non-Yearn</th><th scope="col" class="w-share">Share</th><th scope="col" class="w-claim">Claimed</th><th scope="col" class="w-paid">Paid</th><th scope="col" class="w-paid">Proceeds</th><th scope="col" class="w-eff">Efficiency</th></tr>
 </thead><tbody id="weeks"></tbody></table><p class="none">No weeks yet</p></div>
 </section>
 <section id="info" role="tabpanel" aria-labelledby="tab-info">
@@ -673,7 +673,7 @@ function renderReport() {
     ? `Proceeds per USDC spent over completed weeks: ${amount(earned, 6)} earned for ${amount(spent, 6)} spent. This week counts once it ends.`
     : 'Proceeds per USDC spent over completed weeks. 1.10× means $1.10 earned for every $1 spent.');
 
-  const labels = ['', 'Yearn veCRV', 'Non-Yearn', 'Share', 'Claimed', 'Paid', 'Proceeds', 'Efficiency', 'Vyper'];
+  const labels = ['', 'Yearn veCRV', 'Non-Yearn', 'Share', 'Claimed', 'Paid', 'Proceeds', 'Efficiency'];
   const soft = (name, nodes, tip) => {
     const node = label(span(name, ''), tip);
     node.append(...[nodes].flat());
@@ -693,7 +693,6 @@ function renderReport() {
       paid > 0n ? split(paid, 0, rounded) : big(due[week.week]) > 0n ? soft('due', split(due[week.week], 0, rounded), 'Scheduled, not yet paid') : '—',
       split(week.yearn, 0, rounded),
       pending || paid === 0n ? '—' : over(week) ? times(big(week.yearn), paid) : soft('aside', 'pending', 'Final once the week ends'),
-      split(big(week.output) - big(week.yearn), week.vyper_crv, rounded),
     ], {0: 'title'}, labels);
     tr.classList.toggle('upcoming', pending);
   };
