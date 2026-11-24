@@ -63,7 +63,7 @@ main{padding-top:20px;padding-bottom:48px}
 .label{display:block;margin-top:1px;font-size:11px;color:var(--muted)}.label .act{width:16px;height:16px;margin-left:3px;color:var(--faint)}.info svg{width:13px;height:13px}
 .claim{margin-left:10px;padding:1px 8px;font:11px var(--sans);vertical-align:1px}#claim-status{display:block;margin-top:3px;font:11px var(--sans);color:var(--muted);white-space:normal}#claim-status:empty{display:none}
 /* One styled tooltip for the page, shown the moment a target is hovered or focused. */
-.hint{position:fixed;z-index:20;max-width:250px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);box-shadow:var(--card);font:12px/1.4 var(--sans);color:var(--ink);pointer-events:none}
+.hint{position:fixed;z-index:20;max-width:300px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);box-shadow:var(--card);font:12px/1.4 var(--sans);color:var(--ink);pointer-events:none}
 .button{padding:3px 10px;border:1px solid var(--strong);border-radius:6px;background:var(--surface);font-size:12px}
 .button.primary{border-color:var(--ink);background:var(--ink);color:var(--bg)}.button:disabled{opacity:.5;cursor:default}
 
@@ -197,6 +197,14 @@ const bps = share => big(share) * 10000n / 10n ** 18n;
 const pct = basis => amount(basis, 2) + '%';
 const day = ts => new Date(Number(ts) * 1000).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', timeZone: 'UTC'});
 const when = ts => day(ts) + ' ' + new Date(Number(ts) * 1000).toISOString().slice(11, 16);
+// A vote week runs from Thursday 00:00 UTC to the next; it reads as its first to last day.
+const weekdays = ts => new Date(Number(ts) * 1000).toLocaleDateString('en-GB', {weekday: 'short', timeZone: 'UTC'});
+const weekRange = ts => {
+  const last = Number(ts) + 518400, month = t => day(t).split(' ')[1];
+  return month(ts) === month(last) ? day(ts).split(' ')[0] + '–' + day(last) : day(ts) + ' – ' + day(last);
+};
+const weekBounds = ts => `${weekdays(ts)} ${when(ts)} – ${weekdays(Number(ts) + 604800)} ${when(Number(ts) + 604800)} UTC`;
+const weekCell = ts => label(span('', weekRange(ts)), weekBounds(ts));
 const short = a => a.slice(0, 6) + '…' + a.slice(-4);
 const span = (name, text) => {
   const s = document.createElement('span');
@@ -522,7 +530,7 @@ function renderVotes() {
   const most = Math.max(1, ...bars.map(bar => bar.total)), power = 10 ** Math.floor(Math.log10(most / 4));
   const step = [1, 2, 5, 10].map(n => n * power).find(size => most / size <= 4), peak = Math.ceil(most / step) * step;
   const y = v => bottom - v / peak * (bottom - top);
-  const band = (right - left) / bars.length, wide = Math.min(24, band * .6), every = Math.ceil(52 / band);
+  const band = (right - left) / bars.length, wide = Math.min(24, band * .6), every = Math.ceil(84 / band);
   const root = svg('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', tabindex: 0,
     'aria-label': `Votes on the gauge by week. Latest: Yearn ${whole(now.yearn_weight)} veCRV, others ${whole(total - yearn)} veCRV.`});
   for (const v of [0, peak / 2, peak]) {
@@ -546,7 +554,7 @@ function renderVotes() {
       if (split - gap > cap) group.append(svg('path', {class: 'bar others', d: segment(x, split - gap, cap, true)}));
     }
     if (i === bars.length - 1 || (i % every === 0 && bars.length - 1 - i >= every)) {
-      group.append(svg('text', {class: 'tick', x: x + wide / 2, y: H - 5, 'text-anchor': 'middle'}, day(bar.week)));
+      group.append(svg('text', {class: 'tick', x: x + wide / 2, y: H - 5, 'text-anchor': 'middle'}, weekRange(bar.week)));
     }
     root.append(group);
     return group;
@@ -560,7 +568,7 @@ function renderVotes() {
       return p;
     };
     const date = document.createElement('p');
-    date.textContent = 'Week of ' + day(bar.week) + (bar.pending ? ' · votes so far' : '');
+    date.textContent = weekRange(bar.week) + (bar.pending ? ' · votes so far' : '');
     tip.replaceChildren(date, line('', whole(bar.raw.yearn_weight), 'Yearn'),
       line('budget', whole(big(bar.raw.total_weight) - big(bar.raw.yearn_weight)), 'Non-Yearn'));
     groups.forEach((group, n) => group.setAttribute('opacity', n === i ? 1 : .55));
@@ -672,7 +680,7 @@ function renderReport() {
     const share = pending ? (total > 0n ? pct(yearn * 10000n / total) : '—') : week.ready ? pct(bps(week.share)) : '—';
     const paid = big(drawn[week.week]), claimed = big(week.sold) + big(week.vyper_crv);
     const tr = row('weeks', [
-      pending ? [day(week.week), span('aside', 'next')] : current(week) ? [day(week.week), label(span('dot', ''), 'Current week')] : day(week.week),
+      pending ? [weekCell(week.week), span('aside', 'next')] : current(week) ? [weekCell(week.week), label(span('dot', ''), 'Current week')] : weekCell(week.week),
       counted && yearn > 0n ? weight(yearn) : '—',
       counted && total > yearn ? weight(total - yearn) : '—',
       share,
