@@ -77,7 +77,7 @@ main{padding-top:20px;padding-bottom:48px}
 .figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:0 4px 12px}.figures.three{grid-template-columns:repeat(3,minmax(0,1fr))}
 .votes{margin-bottom:14px;padding:16px 16px 8px}.votes .figure strong{font-size:16px;line-height:22px;letter-spacing:-.3px}
 .key.square{width:8px;height:8px;border-radius:2px}#bars{position:relative}#bars svg{overflow:visible;stroke-width:1}#bars svg:focus-visible{outline:2px solid var(--muted);outline-offset:4px}
-.bar{stroke:none}.bar.yearn{fill:var(--accent)}.bar.others{fill:var(--second)}.pending{opacity:.45}.upcoming td,.due{color:var(--muted)}
+.bar{stroke:none}.bar.yearn{fill:var(--accent)}.bar.others{fill:var(--second)}.pending{opacity:.45}.upcoming td,.due{color:var(--muted)}td .dot{display:inline-block;margin-left:9px;vertical-align:1px}
 .groups th{padding:9px 8px 0;border-bottom:0;text-align:center;color:var(--faint)}.groups+tr th{padding-top:4px}
 .figure{min-width:0}.figure+.figure{padding-left:20px;border-left:1px solid var(--soft)}
 .figure strong{font-size:24px;line-height:30px;letter-spacing:-.5px}.figure .label{margin-top:2px}
@@ -146,7 +146,7 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 <div id="views" hidden>
 <div class="tabs" role="tablist" aria-label="Views">
 <button id="tab-history" type="button" role="tab" aria-controls="history" data-view="history">History<span class="count" id="history-count"></span></button>
-<button id="tab-weeks" type="button" role="tab" aria-controls="weekly" data-view="weeks">Weeks<span class="count" id="weekly-count"></span></button>
+<button id="tab-weeks" type="button" role="tab" aria-controls="weekly" data-view="voting">Voting<span class="count" id="weekly-count"></span></button>
 <button id="tab-info" type="button" role="tab" aria-controls="info" data-view="info">Info</button>
 </div>
 <section class="card scroll stack" id="history" role="tabpanel" aria-labelledby="tab-history"><table><thead><tr><th scope="col" class="h-age" id="time-head">Age</th><th scope="col" class="text">Event</th><th scope="col" class="h-num">Claimed</th><th scope="col" class="h-num">Yearn</th><th scope="col" class="h-num">Vyper</th><th scope="col" class="h-paid">Paid out</th><th scope="col" class="c-link"><span class="visually-hidden">Transaction</span></th></tr></thead><tbody id="transactions"></tbody></table><p class="none">No transactions yet</p></section>
@@ -154,14 +154,14 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 <div class="card votes" id="votes" hidden>
 <div class="figures three">
 <div class="figure"><strong><span id="vote-yearn">—</span><span class="unit">veCRV</span></strong><span class="label"><i class="key square"></i>Yearn<span class="aside" id="vote-share"></span></span></div>
-<div class="figure"><strong><span id="vote-others">—</span><span class="unit">veCRV</span></strong><span class="label"><i class="key square budget"></i>Others</span></div>
+<div class="figure"><strong><span id="vote-others">—</span><span class="unit">veCRV</span></strong><span class="label"><i class="key square budget"></i>Non-Yearn</span></div>
 <div class="figure" id="emissions" hidden><strong id="vote-emissions">—</strong><span class="label">Emissions share<button class="act info" id="tip-emissions" type="button"></button></span></div>
 </div>
 <div id="bars"></div>
 </div>
 <div class="card scroll stack"><table><thead>
 <tr class="groups"><th></th><th colspan="3">Votes · veCRV</th><th></th><th colspan="3">Yearn</th><th></th></tr>
-<tr><th scope="col">Week</th><th scope="col" class="w-vote">Yearn</th><th scope="col" class="w-vote">Others</th><th scope="col" class="w-share">Share</th><th scope="col" class="w-claim">Claimed</th><th scope="col" class="w-paid">Paid</th><th scope="col" class="w-paid">Proceeds</th><th scope="col" class="w-eff">Efficiency</th><th scope="col" class="w-wide">Vyper</th></tr>
+<tr><th scope="col">Week</th><th scope="col" class="w-vote">Yearn</th><th scope="col" class="w-vote">Non-Yearn</th><th scope="col" class="w-share">Share</th><th scope="col" class="w-claim">Claimed</th><th scope="col" class="w-paid">Paid</th><th scope="col" class="w-paid">Proceeds</th><th scope="col" class="w-eff">Efficiency</th><th scope="col" class="w-wide">Vyper</th></tr>
 </thead><tbody id="weeks"></tbody></table><p class="none">No weeks yet</p></div>
 </section>
 <section id="info" role="tabpanel" aria-labelledby="tab-info">
@@ -560,7 +560,7 @@ function renderVotes() {
     const date = document.createElement('p');
     date.textContent = 'Week of ' + day(bar.week) + (bar.pending ? ' · votes so far' : '');
     tip.replaceChildren(date, line('', whole(bar.raw.yearn_weight), 'Yearn'),
-      line('budget', whole(big(bar.raw.total_weight) - big(bar.raw.yearn_weight)), 'Others'));
+      line('budget', whole(big(bar.raw.total_weight) - big(bar.raw.yearn_weight)), 'Non-Yearn'));
     groups.forEach((group, n) => group.setAttribute('opacity', n === i ? 1 : .55));
     const x = left + band * (i + .5);
     tip.hidden = false;
@@ -647,6 +647,7 @@ function renderReport() {
   // at its end, so a week only counts once it is over; until then it reads as pending.
   const times = (earned, spent) => amount(earned * 100n / spent, 2) + '×';
   const over = week => Number(week.week) + WEEK <= Number(report.as_of);
+  const current = week => Number(week.week) <= Number(report.as_of) && !over(week);
   let earned = 0n, spent = 0n;
   for (const week of report.weeks ?? []) {
     if (!over(week)) continue;
@@ -658,7 +659,7 @@ function renderReport() {
     ? `Proceeds per USDC spent over completed weeks: ${amount(earned, 6)} earned for ${amount(spent, 6)} spent. This week counts once it ends.`
     : 'Proceeds per USDC spent over completed weeks. 1.10× means $1.10 earned for every $1 spent.');
 
-  const labels = ['', 'Yearn veCRV', 'Others', 'Share', 'Claimed', 'Paid', 'Proceeds', 'Efficiency', 'Vyper'];
+  const labels = ['', 'Yearn veCRV', 'Non-Yearn', 'Share', 'Claimed', 'Paid', 'Proceeds', 'Efficiency', 'Vyper'];
   const soft = (name, nodes, tip) => {
     const node = label(span(name, ''), tip);
     node.append(...[nodes].flat());
@@ -669,7 +670,7 @@ function renderReport() {
     const share = pending ? (total > 0n ? pct(yearn * 10000n / total) : '—') : week.ready ? pct(bps(week.share)) : '—';
     const paid = big(drawn[week.week]), claimed = big(week.sold) + big(week.vyper_crv);
     const tr = row('weeks', [
-      pending ? [day(week.week), span('aside', 'next')] : day(week.week),
+      pending ? [day(week.week), span('aside', 'next')] : current(week) ? [day(week.week), label(span('dot', ''), 'Current week')] : day(week.week),
       counted && yearn > 0n ? weight(yearn) : '—',
       counted && total > yearn ? weight(total - yearn) : '—',
       share,
@@ -736,6 +737,7 @@ new ResizeObserver(renderVotes).observe(el('bars'));
 // The open tab is kept in the URL, so a reload or a shared link lands on it.
 const tabs = [...document.querySelectorAll('[role=tab]')];
 const showView = name => {
+  if (name === 'weeks') name = 'voting';
   const chosen = tabs.find(tab => tab.dataset.view === name) ?? tabs[0];
   for (const tab of tabs) {
     tab.setAttribute('aria-selected', tab === chosen);
