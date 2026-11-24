@@ -680,7 +680,7 @@ function renderReport() {
     const share = pending ? (total > 0n ? pct(yearn * 10000n / total) : '—') : week.ready ? pct(bps(week.share)) : '—';
     const paid = big(drawn[week.week]), claimed = big(week.sold) + big(week.vyper_crv);
     const tr = row('weeks', [
-      pending ? [weekCell(week.week), span('aside', 'next')] : current(week) ? [weekCell(week.week), label(span('dot', ''), 'Current week')] : weekCell(week.week),
+      pending ? [weekCell(week.week), label(span('aside', 'next'), 'Votes cast so far. They count once this week starts.')] : current(week) ? [weekCell(week.week), label(span('dot', ''), 'Current week')] : weekCell(week.week),
       counted && yearn > 0n ? weight(yearn) : '—',
       counted && total > yearn ? weight(total - yearn) : '—',
       share,
