@@ -63,6 +63,46 @@ def historical_vote(client, week, final):
     }
 
 
+def weekly_weights(rows, snapshots):
+    """Give each week its gauge weights from the escrow's own snapshots.
+
+    They are Yearn's effective veCRV on the gauge at the week boundary and the
+    gauge's total, so a week without a snapshot has none. Funding payments stay
+    out of these rows: they are a separate ledger, and a reader lines them up.
+    """
+    for row in rows.values():
+        row.update(yearn_weight=None, total_weight=None)
+    for event in snapshots:
+        a = event["args"]
+        if a["week"] in rows:
+            rows[a["week"]].update(yearn_weight=a["yearn"], total_weight=a["total"])
+
+
+def votes(client, block, now):
+    """Where the gauge stands now: Yearn's vote, and the weights lined up for next week."""
+    ctrl = contract(client, "controller").functions
+    gauge, voter = ADDRESSES["gauge"], ADDRESSES["voter"]
+
+    def read(fn):
+        return fn.call(block_identifier=block)
+
+    slope, power, end = read(ctrl.vote_user_slopes(voter, gauge))
+    week = now // WEEK * WEEK
+    total = read(ctrl.points_weight(gauge, week + WEEK))[0]
+    if total == 0:
+        # Nobody has touched the gauge this week: next week's weight is this week's, decayed.
+        bias, decay = read(ctrl.points_weight(gauge, week))
+        total = max(bias - decay * WEEK, 0)
+    yearn = slope * (max(end, week + WEEK) - (week + WEEK))
+    return dict(
+        relative_weight=read(ctrl.gauge_relative_weight(gauge, week)),
+        power=power,
+        lock_end=end,
+        last_vote=read(ctrl.last_user_vote(voter, gauge)),
+        next=dict(week=week + WEEK, yearn_weight=min(yearn, total), total_weight=total),
+    )
+
+
 def report(client, c, *, head=None):
     """Read everything at one block: the latest mined block unless `head` is given."""
     if head is None:
@@ -85,6 +125,7 @@ def report(client, c, *, head=None):
         return times[number]
 
     drawn = events(funding.events.Drawn())
+    rounds, cancels = events(funding.events.RoundFunded()), events(funding.events.Cancelled())
     payments = [
         dict(
             usdc=e["args"]["usdc"],
@@ -134,6 +175,8 @@ def report(client, c, *, head=None):
             warnings.append("The current week needs a vote snapshot")
     if read(proceeds.functions.paused()):
         warnings.append("Sales are paused; public checkpoint remains available")
+    snapshots = events(proceeds.events.Snapshot())
+    weekly_weights(rows, snapshots)
     withdrawals = events(proceeds.events.Withdrawn())
     vyper_crv = read(
         contract(client, "token", ADDRESSES["crv"]).functions.balanceOf(proceeds.address)
@@ -161,14 +204,18 @@ def report(client, c, *, head=None):
         ),
         vyper_crv_balance=vyper_crv,
         vyper_crv_claim=vyper_crv_claim(proceeds, vyper_crv),
+        votes=votes(client, block, head["timestamp"]),
         transactions=activity(
-            events(proceeds.events.Snapshot()),
+            snapshots,
             sales,
             drawn,
             shares,
             timestamp,
             withdrawals,
             events(funding.events.Recovered()),
+            rounds,
+            cancels,
+            events(funding.events.RecipientSet()),
         ),
         totals={
             k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "yearn", "vyper_crv"]
@@ -198,13 +245,17 @@ def vyper_crv_claim(proceeds, amount):
     return dict(safe=safe, to=proceeds.address, data=call._encode_transaction_data())
 
 
-def activity(snapshots, sales, payments, shares, timestamp, withdrawals=(), recoveries=()):
-    """One row per checkpoint or work transaction and per transfer out, newest first.
+def activity(
+    snapshots, sales, payments, shares, timestamp,
+    withdrawals=(), recoveries=(), rounds=(), cancels=(), recipients=(),
+):
+    """One row per checkpoint or work transaction and per funding or transfer event, newest first.
 
     A work call that records the week's share also emits Snapshot; it is shown
     once, as work. Funding payments, proceeds withdrawals and funding recoveries
     each get their own row naming the recipient, so a Safe batch that sends
-    several in one transaction lists them all.
+    several in one transaction lists them all. Funding rounds, cancellations and
+    recipient changes are listed the same way.
     """
     rows, transfers = {}, []
 
@@ -246,11 +297,16 @@ def activity(snapshots, sales, payments, shares, timestamp, withdrawals=(), reco
     for e in payments:
         a = e["args"]
         transfers.append(dict(base(e), kind="payment", usdc=a["usdc"], recipient=a["recipient"]))
-    for kind, events, to in [("withdrawal", withdrawals, "recipient"), ("recovery", recoveries, "receiver")]:
+    for kind, events, fields in [
+        ("withdrawal", withdrawals, dict(token="token", amount="amount", recipient="recipient")),
+        ("recovery", recoveries, dict(token="token", amount="amount", recipient="receiver")),
+        ("round", rounds, dict(usdc="usdc", first_week="first_week")),
+        ("cancel", cancels, dict(usdc="usdc")),
+        ("recipient", recipients, dict(recipient="recipient")),
+    ]:
         for e in events:
-            a = e["args"]
             transfers.append(
-                dict(base(e), kind=kind, token=a["token"], amount=a["amount"], recipient=a[to])
+                dict(base(e), kind=kind, **{key: e["args"][arg] for key, arg in fields.items()})
             )
     return sorted(
         [*rows.values(), *transfers], key=lambda r: (r["block"], r["index"]), reverse=True
