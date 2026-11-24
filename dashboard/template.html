@@ -196,6 +196,9 @@ const amount = (x, d) => {
 };
 const bps = share => big(share) * 10000n / 10n ** 18n;
 const pct = basis => amount(basis, 2) + '%';
+// Whole units and whole percents, rounded to nearest, for the weekly table.
+const rounded = (x, d) => { const scale = 10n ** BigInt(d); return ((big(x) + scale / 2n) / scale).toLocaleString('en-US'); };
+const percent = basis => ((big(basis) + 50n) / 100n).toString() + '%';
 const day = ts => new Date(Number(ts) * 1000).toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'UTC'});
 const when = ts => day(ts) + ' ' + new Date(Number(ts) * 1000).toISOString().slice(11, 16);
 // A vote week runs from Thursday 00:00 UTC to the next; it reads as its first to last day.
@@ -253,12 +256,12 @@ const token = symbol => {
   return mark;
 };
 // In tables the token's icon stands in for its symbol.
-const split = (usdc, crv) => {
+const split = (usdc, crv, format = amount) => {
   const parts = [];
   for (const [x, d, symbol] of [[usdc, 6, 'USDC'], [crv, 18, 'CRV']]) {
     if (big(x) <= 0n) continue;
     if (parts.length) parts.push(' + ');
-    parts.push(amount(x, d), token(symbol));
+    parts.push(format(x, d), token(symbol));
   }
   return parts.length ? parts : '—';
 };
@@ -517,7 +520,7 @@ function renderVotes() {
   const now = weeks[weeks.length - 1], total = big(now.total_weight), yearn = big(now.yearn_weight);
   el('vote-yearn').textContent = weight(yearn);
   el('vote-others').textContent = weight(total - yearn);
-  el('vote-share').textContent = total > 0n ? pct(yearn * 10000n / total) : '';
+  el('vote-share').textContent = total > 0n ? percent(yearn * 10000n / total) : '';
   el('emissions').hidden = report.votes?.relative_weight == null;
   if (report.votes?.relative_weight != null) el('vote-emissions').textContent = pct(bps(report.votes.relative_weight));
 
@@ -678,18 +681,19 @@ function renderReport() {
   };
   const weekRow = (week, pending) => {
     const counted = week.total_weight != null, total = big(week.total_weight), yearn = big(week.yearn_weight);
-    const share = pending ? (total > 0n ? pct(yearn * 10000n / total) : '—') : week.ready ? pct(bps(week.share)) : '—';
+    const basis = pending ? (total > 0n ? yearn * 10000n / total : null) : week.ready ? bps(week.share) : null;
+    const share = basis == null ? '—' : label(span('', percent(basis)), pct(basis));
     const paid = big(drawn[week.week]), claimed = big(week.sold) + big(week.vyper_crv);
     const tr = row('weeks', [
       pending ? [weekCell(week.week), label(span('tag', 'next'), 'Votes cast so far. They count once this week starts.')] : current(week) ? [weekCell(week.week), label(span('dot', ''), 'Current week')] : weekCell(week.week),
       counted && yearn > 0n ? weight(yearn) : '—',
       counted && total > yearn ? weight(total - yearn) : '—',
       share,
-      claimed > 0n ? [amount(claimed, 18), token('CRV')] : '—',
-      paid > 0n ? split(paid, 0) : big(due[week.week]) > 0n ? soft('due', split(due[week.week], 0), 'Scheduled, not yet paid') : '—',
-      split(week.yearn, 0),
+      claimed > 0n ? [rounded(claimed, 18), token('CRV')] : '—',
+      paid > 0n ? split(paid, 0, rounded) : big(due[week.week]) > 0n ? soft('due', split(due[week.week], 0, rounded), 'Scheduled, not yet paid') : '—',
+      split(week.yearn, 0, rounded),
       pending || paid === 0n ? '—' : over(week) ? times(big(week.yearn), paid) : soft('aside', 'pending', 'Final once the week ends'),
-      split(big(week.output) - big(week.yearn), week.vyper_crv),
+      split(big(week.output) - big(week.yearn), week.vyper_crv, rounded),
     ], {0: 'title'}, labels);
     tr.classList.toggle('upcoming', pending);
   };
