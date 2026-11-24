@@ -189,7 +189,7 @@ def report_at_head(client, c, head, history):
             )
         ),
         vyper_crv_balance=vyper_crv,
-        vyper_crv_claim=vyper_crv_claim(proceeds, vyper_crv),
+        vyper_crv_claim=vyper_crv_claim(proceeds),
         votes=votes(client, block, head["timestamp"]),
         transactions=activity(
             snapshots,
@@ -224,11 +224,13 @@ def report_at_head(client, c, head, history):
     return serialize(data)
 
 
-def vyper_crv_claim(proceeds, amount):
-    """The Vyper Safe's call that withdraws all held CRV to itself."""
-    safe = ADDRESSES["receiver"]
-    call = proceeds.functions.withdraw(ADDRESSES["crv"], amount, safe)
-    return dict(safe=safe, to=proceeds.address, data=call._encode_transaction_data())
+def vyper_crv_claim(proceeds):
+    """Who withdraws Vyper's held CRV, and from where; the page adds the amount and receiver.
+
+    There is no ready-made call because the Safe must name a receiver other than itself:
+    `work` pulls whatever CRV the Safe holds and sells it as gauge emissions.
+    """
+    return dict(safe=ADDRESSES["receiver"], to=proceeds.address)
 
 
 def activity(

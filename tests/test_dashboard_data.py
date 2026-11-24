@@ -7,20 +7,24 @@ from web3 import Web3
 from conftest import UNIT
 from vyper_grant import chain
 from vyper_grant.chain import activity, votes, vyper_crv_claim, weekly_weights
-from vyper_grant.core import ADDRESSES, artifact
+from vyper_grant.core import ADDRESSES, ROOT, artifact
 
 WEEK_START = 1_795_046_400
 SHARE = 25 * 10**16  # 25%
 
 
-def test_claim_call_moves_all_held_crv_to_the_vyper_safe(system):
+def test_claim_moves_all_held_crv_to_the_receiver_vyper_names(system):
     s = system
-    s.crv.mint(s.escrow.address, 112 * UNIT + 7)
+    held = 112 * UNIT + 7
+    s.crv.mint(s.escrow.address, held)
     offline = Web3().eth.contract(address=s.escrow.address, abi=artifact("proceeds")["abi"])
-    claim = vyper_crv_claim(offline, 112 * UNIT + 7)
-    assert claim["safe"] == ADDRESSES["receiver"] == s.receiver
-    assert claim["to"] == s.escrow.address
-    calldata = bytes.fromhex(claim["data"][2:])
+    claim = vyper_crv_claim(offline)
+    assert claim == {"safe": ADDRESSES["receiver"], "to": s.escrow.address}
+    assert claim["safe"] == s.receiver
+    # Encoded as the page does: the selector, then token, amount and receiver as 32-byte words.
+    elsewhere = boa.env.generate_address()
+    words = [int(ADDRESSES["crv"], 16), held, int(elsewhere, 16)]
+    calldata = Web3.keccak(text=PAGE_WITHDRAW)[:4] + b"".join(w.to_bytes(32, "big") for w in words)
 
     with pytest.raises(Revert) as refused:
         boa.env.raw_call(claim["to"], sender=s.keeper, data=calldata)
@@ -28,7 +32,17 @@ def test_claim_call_moves_all_held_crv_to_the_vyper_safe(system):
     before = s.crv.balanceOf(s.receiver)
     boa.env.raw_call(claim["to"], sender=claim["safe"], data=calldata)
     assert s.crv.balanceOf(s.escrow.address) == 0
-    assert s.crv.balanceOf(s.receiver) - before == 112 * UNIT + 7
+    assert s.crv.balanceOf(elsewhere) == held
+    assert s.crv.balanceOf(s.receiver) == before
+
+
+PAGE_WITHDRAW = "withdraw(address,uint256,address)"
+
+
+def test_page_encodes_the_escrow_withdraw():
+    function = next(f for f in artifact("proceeds")["abi"] if f.get("name") == "withdraw")
+    assert PAGE_WITHDRAW == "withdraw(" + ",".join(i["type"] for i in function["inputs"]) + ")"
+    assert f"keccak('{PAGE_WITHDRAW}')" in (ROOT / "dashboard/template.html").read_text()
 
 
 def event(tx, block, index, **args):
