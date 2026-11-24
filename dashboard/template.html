@@ -113,7 +113,7 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 @media(min-width:960px){table{table-layout:fixed}.c-date{width:17%}.c-hold{width:32%}.c-link{width:44px}.h-age{width:12%}.h-num{width:14%}.h-paid{width:27%}.w-vote{width:7.5%}.w-share{width:8%}.w-claim{width:13%}.w-paid{width:12%}.w-eff{width:9%}.w-wide{width:20%}}
 @media(max-width:600px){.bar,main{padding-left:16px;padding-right:16px}.full{display:none}.short{display:inline}.address .act{opacity:1}
   .figure strong{font-size:19px;line-height:26px}.figure+.figure{padding-left:14px}.chart .figure .unit{font-size:0}
-  .figures.three{grid-template-columns:1fr 1fr;gap:10px 0}.figures.three .figure:nth-child(3){padding-left:0;border-left:0}
+  .figures.three{grid-template-columns:1fr 1fr;gap:10px 0}.figures.three .figure:nth-child(3){grid-column:1/-1;display:flex;align-items:baseline;gap:8px;padding:10px 0 0;border-left:0;border-top:1px solid var(--soft)}.figures.three .figure:nth-child(3) .label{margin:0}
   /* Table rows stack: a title with its time and link, then each amount under its own name. */
   .stack table,.stack tbody{display:block}.stack thead{display:none}
   .stack tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;padding:11px 16px;border-bottom:1px solid var(--soft)}
@@ -329,7 +329,7 @@ for (const type of ['pointerover', 'focusin', 'pointerdown']) {
 document.addEventListener('focusout', hideHint);
 document.addEventListener('scroll', hideHint, true);
 document.documentElement.addEventListener('pointerleave', hideHint);
-for (const button of document.querySelectorAll('.info')) button.append(icon('info'));
+for (const button of document.querySelectorAll('.info')) button.replaceChildren(icon('info'));
 
 // History times read as an age; clicking one switches every row to the UTC time and back.
 let ages = true;

@@ -162,6 +162,13 @@ Hosting follows the stYFI dashboard: static files on Vercel and a collector on E
 
 Code and venv live in `/opt/vyper-grant`, root-owned and readable by `svc-vyper-grant`; install the package into the venv without the `dev` extra. The unit reads [`config/mainnet.json`](config/mainnet.json).
 
+To update, copy the changed files from `master` into `/opt/vyper-grant` (root-owned, group `svc-vyper-grant`, mode 644), then reinstall and run once:
+
+```sh
+sudo uv pip install --python /opt/vyper-grant/.venv/bin/python --reinstall-package vyper-grant /opt/vyper-grant
+sudo systemctl start vyper-grant-report.service
+```
+
 ```sh
 sudo install -m 644 deploy/systemd/vyper-grant-report.service deploy/systemd/vyper-grant-report.timer /etc/systemd/system/
 sudo install -m 644 deploy/caddy/vyper-grant.caddy /etc/caddy/vyper-grant.caddy
