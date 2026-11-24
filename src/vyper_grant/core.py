@@ -49,17 +49,10 @@ def units(value, decimals=18):
 
 def load_config(path):
     c = json.loads(Path(path).read_text())
-    allowed = {
-        "funding",
-        "proceeds",
-        "deployment_block",
-        "keeper",
-        "min_trade_crv",
-        "max_crv",
-        "sell_vyper",
-        "slippage_bps",
-        "max_gas_gwei",
-    }
+    # Older deployments stored bot settings alongside the contract addresses.
+    for key in ("min_trade_crv", "max_crv", "sell_vyper", "slippage_bps", "max_gas_gwei"):
+        c.pop(key, None)
+    allowed = {"funding", "proceeds", "deployment_block", "keeper"}
     if set(c) - allowed:
         raise ValueError(
             "Unknown or obsolete configuration fields: "
@@ -68,20 +61,8 @@ def load_config(path):
     for key in ["funding", "proceeds", "keeper"]:
         if c.get(key):
             c[key] = address(c[key])
-    for key in [
-        "deployment_block",
-        "slippage_bps",
-    ]:
-        if c.get(key) is not None and type(c[key]) is not int:
-            raise ValueError(key + " must be an integer")
-    if not 0 <= c["slippage_bps"] < 10000:
-        raise ValueError("Slippage must be between 0 and 9999 bps")
-    if units(c["min_trade_crv"]) == 0:
-        raise ValueError("Minimum trade must be positive")
-    if units(c.get("max_crv", "15000")) < units(c["min_trade_crv"]):
-        raise ValueError("Maximum CRV must be at least the minimum trade")
-    if type(c.get("sell_vyper", True)) is not bool:
-        raise ValueError("sell_vyper must be a boolean")
+    if c.get("deployment_block") is not None and type(c["deployment_block"]) is not int:
+        raise ValueError("deployment_block must be an integer")
     return c
 
 
@@ -91,7 +72,7 @@ def artifact(name):
 
 
 def build():
-    """Compilation belongs to the build step, never to a keeper/report pass."""
+    """Compile both escrows and update their committed artifacts."""
     from vyper import compile_code
 
     result = {

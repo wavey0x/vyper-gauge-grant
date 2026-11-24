@@ -10,7 +10,6 @@ from conftest import deploy_mocks
 from vyper_grant.core import ADDRESSES, ROOT, WEEK, artifact
 from vyper_grant.chain import verify, report, historical_vote
 from vyper_grant.cli import setup, doctor, deployment, main
-from vyper_grant.keeper import run
 
 
 @pytest.fixture
@@ -236,10 +235,8 @@ def begin(s):
     s["funding"].functions.work().transact({"from": s["keeper"]})
 
 
-def submit(s, result):
-    return s["client"].eth.send_transaction(
-        {"from": s["keeper"], "to": result["to"], "data": result["data"]}
-    )
+def process_test_batch(s, *, sell_vyper=True):
+    s["escrow"].functions.work(0, 100 * 10**18, sell_vyper).transact({"from": s["keeper"]})
 
 
 def test_verified_contracts_and_idempotent_setup(chain):
@@ -249,7 +246,14 @@ def test_verified_contracts_and_idempotent_setup(chain):
     prepared = deployment(s["client"], {}, "funding", s["deployer"])
     assert prepared["constructor_arguments"] == []
     vyper, manager = setup(s["client"], {**s["c"], "funding": None}, 10**25)
-    assert len(vyper["transactions"]) == len(manager["transactions"]) == 1
+    assert len(vyper["transactions"]) == 1
+    assert len(manager["transactions"]) == 3
+    for tx in manager["transactions"]:
+        assert tx["to"] == s["escrow"].address and tx["value"] == "0"
+        s["client"].eth.send_transaction({"from": s["manager"], "to": tx["to"], "data": tx["data"]})
+    assert s["escrow"].functions.cooldown().call() == 21_600
+    assert s["escrow"].functions.keepers(s["manager"]).call()
+    assert s["escrow"].functions.keepers(s["keeper"]).call()
     assert doctor(s["client"], s["c"])["mint_enabled"]
     assert doctor(s["client"], {**s["c"], "funding": None})["mint_enabled"]
     assert s["escrow"].functions.DEPLOYED_WEEK().call() == s["start"] - WEEK
@@ -257,21 +261,10 @@ def test_verified_contracts_and_idempotent_setup(chain):
         verify(s["client"], {**s["c"], "funding": s["gauge"].address})
 
 
-def test_keeper_prepares_one_sale_and_report_tracks_withdrawals(chain, tmp_path):
+def test_report_tracks_proceeds_and_withdrawals(chain):
     s = chain
     begin(s)
-    result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "sale" and result["dry_run"]
-    function, arguments = s["escrow"].decode_function_input(result["data"])
-    assert function.fn_name == "work"
-    assert set(arguments) == {"min_out", "max_crv", "sell_vyper"}
-    assert arguments["sell_vyper"] is True
-    assert arguments["max_crv"] == int(result["max_crv"])
-    assert arguments["max_crv"] == int(result["crv"])
-    assert arguments["min_out"] == int(result["min_usdc"])
-    assert not s["escrow"].functions.weeks(s["start"]).call()[0]
-    submit(s, result)
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
+    process_test_batch(s)
     data = report(s["client"], s["c"])
     assert data["spent"] == str(1000 * 10**6)
     assert "budget" not in data
@@ -292,10 +285,10 @@ def test_keeper_prepares_one_sale_and_report_tracks_withdrawals(chain, tmp_path)
     assert s["usdc"].functions.balanceOf(s["payee"]).call() == int(data["proceeds_balance"])
 
 
-def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain, tmp_path):
+def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain):
     s = chain
     begin(s)
-    submit(s, run(s["client"], s["c"], directory=tmp_path))
+    process_test_batch(s)
     held = s["usdc"].functions.balanceOf(s["escrow"].address).call()
     s["escrow"].functions.set_yearn_receiver(s["payee"]).transact(
         {"from": s["manager"]}
@@ -303,7 +296,7 @@ def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain, tmp_
     before = s["usdc"].functions.balanceOf(s["payee"]).call()
     s["tester"].time_travel(s["start"] + 80000)
     s["tester"].mine_block()
-    submit(s, run(s["client"], s["c"], directory=tmp_path))
+    process_test_batch(s)
     data = report(s["client"], s["c"])
     forwarded = s["usdc"].functions.balanceOf(s["payee"]).call() - before
     assert forwarded > 0
@@ -313,43 +306,23 @@ def test_receiver_routing_and_report_distinguish_forwarded_from_held(chain, tmp_
     assert int(data["totals"]["yearn"]) == held + forwarded
 
 
-def test_keeper_quotes_exact_capped_pull_including_receiver_balance(chain, tmp_path):
+def test_cli_quotes_explicit_crv_amount(chain, tmp_path, monkeypatch, capsys):
     s = chain
-    begin(s)
-    s["c"].update(max_crv="100", min_trade_crv="50")
-    s["crv"].functions.mint(s["receiver"], 500 * 10**18).transact()
-    result = run(s["client"], s["c"], directory=tmp_path)
-    _, args = s["escrow"].decode_function_input(result["data"])
-    amount = 100 * 10**18
-    assert args["max_crv"] == int(result["crv"]) == amount
-    assert args["min_out"] == s["escrow"].functions.quote(amount).call() * 995 // 1000
-    receipt = s["client"].eth.get_transaction_receipt(submit(s, result))
-    sold = s["escrow"].events.Sold().get_logs(
-        from_block=receipt.blockNumber, to_block=receipt.blockNumber
-    )[0]["args"]
-    assert sold["crv"] == amount
-    assert s["crv"].functions.balanceOf(s["receiver"]).call() >= 400 * 10**18
-
-
-def test_keeper_quotes_only_yearns_crv_and_reports_retention(chain, tmp_path, monkeypatch, capsys):
-    s = chain
-    begin(s)
-    s["c"].update(sell_vyper=False, max_crv="100", min_trade_crv="50")
     config = tmp_path / "config.json"
-    config.write_text(json.dumps(s["c"]))
+    config.write_text(json.dumps({**s["c"], "funding": None, "keeper": None}))
     monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
-    monkeypatch.setattr("sys.argv", ["vyper-grant", "--config", str(config), "quote"])
+    monkeypatch.setattr("sys.argv", ["vyper-grant", "--config", str(config), "quote", "--crv", "12.5"])
     main()
-    quoted = json.loads(capsys.readouterr().out)
-    result = run(s["client"], s["c"], directory=tmp_path)
-    _, args = s["escrow"].decode_function_input(result["data"])
-    assert args["sell_vyper"] is False
-    assert args["max_crv"] == 100 * 10**18
-    assert quoted["swap_crv"] == result["swap_crv"] == str(25 * 10**18)
-    assert quoted["vyper_crv"] == result["vyper_crv"] == str(75 * 10**18)
-    assert args["min_out"] == int(quoted["usdc"]) * 995 // 1000
-    assert not s["escrow"].functions.weeks(s["start"]).call()[0]
-    submit(s, result)
+    amount = 125 * 10**17
+    assert json.loads(capsys.readouterr().out) == {
+        "crv": str(amount), "usdc": str(s["escrow"].functions.quote(amount).call())
+    }
+
+
+def test_report_tracks_retained_crv_across_sales(chain):
+    s = chain
+    begin(s)
+    process_test_batch(s, sell_vyper=False)
     data = report(s["client"], s["c"])
     assert data["weeks"][-1]["sold"] == str(25 * 10**18)
     assert data["weeks"][-1]["yearn"] == data["weeks"][-1]["output"]
@@ -357,26 +330,17 @@ def test_keeper_quotes_only_yearns_crv_and_reports_retention(chain, tmp_path, mo
     assert data["withdrawn_crv"] == "0"
     s["tester"].time_travel(s["client"].eth.get_block("latest").timestamp + 600)
     s["tester"].mine_block()
-    s["c"]["sell_vyper"] = True
-    submit(s, run(s["client"], s["c"], directory=tmp_path))
+    process_test_batch(s)
     assert report(s["client"], s["c"])["vyper_crv_balance"] == str(75 * 10**18)
 
 
-def test_keeper_can_retain_entire_batch_with_zero_yearn_share(chain, tmp_path):
+def test_report_tracks_retention_without_a_swap(chain):
     s = chain
-    s["c"].update(sell_vyper=False, max_crv="100", min_trade_crv="50")
     s["crv"].functions.mint(s["receiver"], 100 * 10**18).transact()
-    s["tester"].time_travel(s["start"] - 180)
-    s["tester"].mine_block()
-    result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "retain"
-    assert result["swap_crv"] == result["min_usdc"] == "0"
-    assert result["vyper_crv"] == result["crv"] == str(100 * 10**18)
-    submit(s, result)
+    process_test_batch(s, sell_vyper=False)
     data = report(s["client"], s["c"])
     assert data["vyper_crv_balance"] == str(100 * 10**18)
     assert data["totals"]["sold"] == data["totals"]["output"] == "0"
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
 
 
 def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
@@ -471,28 +435,6 @@ def test_cli_prepares_receiver_change_withdrawal_and_governance_clawback(
     assert s["vault"].functions.balanceOf(s["governance"]).call() == shares
 
 
-def test_checkpoint_retries_while_paused_and_explicit_command_is_public(
-    chain, tmp_path
-):
-    s = chain
-    s["c"]["funding"] = None
-    s["escrow"].functions.set_paused(True).transact({"from": s["manager"]})
-    s["tester"].time_travel(s["start"] + 1)
-    s["tester"].mine_block()
-    first = run(s["client"], s["c"], directory=tmp_path)
-    assert first["status"] == "checkpoint"
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "checkpoint"
-    submit(s, first)
-    assert s["escrow"].functions.weeks(s["start"]).call()[0]
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "paused"
-    s["escrow"].functions.set_keeper(s["keeper"], False).transact(
-        {"from": s["manager"]}
-    )
-    explicit = run(s["client"], s["c"], directory=tmp_path, checkpoint_only=True)
-    submit(s, explicit)
-    assert explicit["status"] == "checkpoint"
-
-
 def test_funding_cli_and_report_record_scheduled_payments(chain, tmp_path, monkeypatch):
     s = chain
     config = tmp_path / "config.json"
@@ -518,16 +460,14 @@ def test_funding_cli_and_report_record_scheduled_payments(chain, tmp_path, monke
     assert pending["spent"] == "0"
     assert pending["funding_next_week"] == str(s["start"])
     assert pending["funding_payments"] == [str(15 * 10**6)] * 2
-    assert run(s["client"], s["c"], directory=tmp_path, funding_only=True)["status"] == "not due"
+    assert not s["funding"].functions.canWork().call()
     s["tester"].time_travel(s["start"])
     s["tester"].mine_block()
-    payment = run(s["client"], {**s["c"], "proceeds": None}, directory=tmp_path, funding_only=True)
-    assert payment["status"] == "funding payment" and payment["usdc"] == str(15 * 10**6)
-    submit(s, payment)
+    s["funding"].functions.work().transact()
     execute("set-recipient", "--account", s["payee"])
     s["tester"].time_travel(s["start"] + WEEK)
     s["tester"].mine_block()
-    submit(s, run(s["client"], s["c"], directory=tmp_path, funding_only=True))
+    s["funding"].functions.work().transact()
     assert s["usdc"].functions.balanceOf(burner).call() == 15 * 10**6
     assert s["usdc"].functions.balanceOf(s["payee"]).call() == 15 * 10**6
     data = report(s["client"], s["c"])
@@ -544,27 +484,6 @@ def test_funding_cli_and_report_record_scheduled_payments(chain, tmp_path, monke
     execute("cancel-round", "--governance")
     assert not s["funding"].functions.canWork().call()
     assert s["funding"].functions.payments(0).call() == 0
-
-
-def test_funding_keeper_cli_works_without_proceeds_or_keeper_role(chain, tmp_path, monkeypatch, capsys):
-    s = chain
-    s["funding"].functions.fund_round(20 * 10**6).transact({"from": s["manager"]})
-    s["escrow"].functions.set_keeper(s["keeper"], False).transact({"from": s["manager"]})
-    config = tmp_path / "config.json"
-    config.write_text(json.dumps({**s["c"], "proceeds": None}))
-    monkeypatch.setattr("vyper_grant.cli.rpc", lambda: s["client"])
-    monkeypatch.setattr("sys.argv", [
-        "vyper-grant", "--config", str(config), "--out", str(tmp_path), "funding-keeper",
-    ])
-    s["tester"].time_travel(s["start"])
-    s["tester"].mine_block()
-    main()
-    prepared = json.loads(capsys.readouterr().out)
-    function, args = s["funding"].decode_function_input(prepared["data"])
-    assert function.fn_name == "work" and args == {}
-    submit(s, prepared)
-    main()
-    assert json.loads(capsys.readouterr().out)["status"] == "not due"
 
 
 def test_archive_read_excludes_boundary_block_revote(chain):
@@ -587,40 +506,14 @@ def test_archive_read_excludes_boundary_block_revote(chain):
     assert historical["slope"] == 10**12
 
 
-def test_closing_sale_bypasses_minimum_but_respects_cap(chain, tmp_path):
-    s = chain
-    begin(s)
-    submit(s, run(s["client"], s["c"], directory=tmp_path))
-    s["c"]["min_trade_crv"] = "1000000"
-    s["tester"].time_travel(s["start"] + WEEK - 600)
-    s["tester"].mine_block()
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "below minimum"
-    s["tester"].time_travel(s["start"] + WEEK - 180)
-    s["tester"].mine_block()
-    result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "sale" and int(result["crv"]) > 1000 * 10**18
-    tx = submit(s, result)
-    receipt = s["client"].eth.get_transaction_receipt(tx)
-    assert receipt.status == 1
-    sold = s["escrow"].events.Sold().get_logs(from_block=receipt.blockNumber, to_block=receipt.blockNumber)[0]["args"]["crv"]
-    assert sold == int(result["crv"]) <= int(s["c"]["max_crv"]) * 10**18
-    assert s["crv"].functions.balanceOf(s["receiver"]).call() > 0
-    assert (
-        s["gauge"].functions.integrate_fraction(s["receiver"]).call()
-        == s["minter"].functions.minted(s["receiver"], s["gauge"].address).call()
-    )
-
-
-def test_keeper_and_weekly_reporting_work_without_payments(chain, tmp_path):
+def test_weekly_reporting_works_without_payments(chain):
     s = chain
     s["tester"].time_travel(s["start"] + 40000)
     s["tester"].mine_block()
     before = report(s["client"], s["c"])
     assert before["weeks"][-1]["status"] == "Needs checkpoint"
     assert before["warnings"] == ["The current week needs a vote snapshot"]
-    result = run(s["client"], {**s["c"], "funding": None}, directory=tmp_path)
-    assert result["status"] == "sale"
-    submit(s, result)
+    process_test_batch(s)
     data = report(s["client"], s["c"])
     assert data["spent"] == "0" and data["payments"] == []
     assert int(data["totals"]["yearn"]) > 0
@@ -628,85 +521,3 @@ def test_keeper_and_weekly_reporting_work_without_payments(chain, tmp_path):
     assert data["weeks"][-1]["status"] == "Active"
     assert "paid" not in data["weeks"][-1]
     assert "earned" not in data["totals"] and "remaining" not in data["weeks"][-1]
-
-
-def test_boundary_checkpoint_during_cooldown_does_not_bypass_next_week_minimum(chain, tmp_path):
-    s = chain
-    begin(s)
-    end = s["start"] + WEEK
-    s["tester"].time_travel(end - 180)
-    quoted = s["escrow"].functions.claimable().call()
-    s["escrow"].functions.work(
-        0, quoted, True
-    ).transact({"from": s["keeper"]})
-    s["c"]["min_trade_crv"] = "1000000"
-    s["tester"].time_travel(end + 60)
-    s["tester"].mine_block()
-    result = run(s["client"], s["c"], directory=tmp_path)
-    assert result["status"] == "checkpoint"
-    submit(s, result)
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "cooldown"
-    s["tester"].time_travel(end + 420)
-    s["tester"].mine_block()
-    assert run(s["client"], s["c"], directory=tmp_path)["status"] == "below minimum"
-
-
-def test_prepared_keeper_sale_can_land_in_next_week(chain, tmp_path):
-    s = chain
-    begin(s)
-    s["escrow"].functions.checkpoint().transact()
-    s["gauge"].functions.set_vote(
-        s["voter"], 2 * 10**12, s["start"] + 52 * WEEK, s["start"] + 40000
-    ).transact()
-    boundary = s["start"] + WEEK
-    s["tester"].time_travel(boundary - 180)
-    s["tester"].mine_block()
-    prepared = run(s["client"], s["c"], directory=tmp_path)
-    assert prepared["status"] == "sale"
-    s["tester"].time_travel(boundary + 60)
-    receipt = s["client"].eth.get_transaction_receipt(submit(s, prepared))
-    sold = s["escrow"].events.Sold().get_logs(
-        from_block=receipt.blockNumber, to_block=receipt.blockNumber
-    )[0]["args"]
-    assert sold["week"] == boundary
-    assert sold["yearn"] == sold["usdc"] // 2
-    assert sold["crv"] == int(prepared["max_crv"])
-
-
-def test_uncertain_broadcast_uses_chain_state_on_next_pass(
-    chain, tmp_path, monkeypatch
-):
-    s = chain
-    begin(s)
-    monkeypatch.setenv(
-        "KEEPER_PRIVATE_KEY", s["tester"].backend.account_keys[4].to_hex()
-    )
-    nonce = s["client"].eth.get_transaction_count(s["keeper"])
-    original = s["client"].eth.send_raw_transaction
-    hashes = []
-
-    def uncertain(raw):
-        hashes.append(original(raw))
-        raise ConnectionError("response lost after inclusion")
-
-    monkeypatch.setattr(s["client"].eth, "send_raw_transaction", uncertain)
-    with pytest.raises(ConnectionError):
-        run(s["client"], s["c"], True, tmp_path)
-    assert s["client"].eth.get_transaction_receipt(hashes[0]).status == 1
-    monkeypatch.setattr(s["client"].eth, "send_raw_transaction", original)
-    assert run(s["client"], s["c"], True, tmp_path)["status"] == "cooldown"
-    assert s["client"].eth.get_transaction_count(s["keeper"]) == nonce + 1
-    assert not (tmp_path / "pending.json").exists()
-
-
-def test_pending_nonce_prevents_another_submission(chain, tmp_path, monkeypatch):
-    s = chain
-    original = s["client"].eth.get_transaction_count
-    monkeypatch.setattr(
-        s["client"].eth,
-        "get_transaction_count",
-        lambda account, block_identifier="latest": (
-            original(account) + (block_identifier == "pending")
-        ),
-    )
-    assert run(s["client"], s["c"], True, tmp_path)["status"] == "pending nonce"

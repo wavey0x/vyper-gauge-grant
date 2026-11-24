@@ -1,4 +1,4 @@
-"""Build unsigned deployments and Safe batches; only the keeper can broadcast."""
+"""Prepare unsigned deployments and Safe batches, inspect escrows, and generate reports."""
 
 import argparse
 import json
@@ -16,7 +16,7 @@ from .core import (
     rpc,
     units,
 )
-from .chain import historical_vote, report, serialize, verify
+from .chain import historical_vote, report, verify
 from .report import collect, render
 
 
@@ -59,7 +59,11 @@ def setup(client, c, allowance):
     ]
     if not m.allowed_to_mint_for(escrow.address, A["receiver"]).call():
         calls.append(m.toggle_approve_mint(escrow.address))
-    manager = [escrow.functions.set_keeper(address(c["keeper"]), True)]
+    manager = [
+        escrow.functions.set_cooldown(6 * 60 * 60),
+        escrow.functions.set_keeper(address(c["keeper"]), True),
+        escrow.functions.set_keeper(A["manager"], True),
+    ]
     return batch(A["receiver"], *calls), batch(A["manager"], *manager)
 
 
@@ -114,8 +118,10 @@ def main():
     p.add_argument("--config", default="config/live.json")
     p.add_argument("--out", default="output")
     sub = p.add_subparsers(dest="command", required=True)
-    for name in ["build", "doctor", "quote"]:
+    for name in ["build", "doctor"]:
         sub.add_parser(name)
+    q = sub.add_parser("quote", help="Quote an explicit CRV swap amount in USDC")
+    q.add_argument("--crv", required=True, help="Amount of CRV to quote")
     d = sub.add_parser("deploy")
     d.add_argument("contract", choices=CONTRACTS)
     d.add_argument("--deployer", required=True)
@@ -155,9 +161,6 @@ def main():
     s.add_argument("--seconds", type=int, required=True)
     s = sub.add_parser("set-paused")
     s.add_argument("paused", choices=["true", "false"])
-    for name in ["keeper", "checkpoint", "funding-keeper"]:
-        k = sub.add_parser(name)
-        k.add_argument("--send", action="store_true")
     r = sub.add_parser("report")
     source = r.add_mutually_exclusive_group()
     source.add_argument("--input", help="Render saved data instead of reading the chain")
@@ -194,22 +197,11 @@ def main():
             atomic_json(out / "setup-manager.safe.json", manager)
             print("Prepared Vyper and manager setup batches")
             return
-        elif args.command in ["keeper", "checkpoint", "funding-keeper"]:
-            from .keeper import run
-
-            print(
-                json.dumps(
-                    run(
-                        client,
-                        c,
-                        args.send,
-                        out / "keeper",
-                        checkpoint_only=args.command == "checkpoint",
-                        funding_only=args.command == "funding-keeper",
-                    ),
-                    indent=2,
-                )
-            )
+        elif args.command == "quote":
+            (escrow,) = verify(client, c, names=("proceeds",))
+            amount = units(args.crv)
+            usdc = escrow.functions.quote(amount).call()
+            print(json.dumps({"crv": str(amount), "usdc": str(usdc)}))
             return
         else:
             funding_only = args.command in ["fund-round", "cancel-round", "set-recipient", "recover"]
@@ -220,12 +212,6 @@ def main():
                 ef = escrow.functions
             meta = {}
             sender = A["manager"]
-            if args.command == "quote":
-                from .keeper import quote_work
-
-                block = client.eth.block_number
-                print(json.dumps(serialize(quote_work(escrow, c, block))))
-                return
             if args.command == "fund-round":
                 fn = funding.functions.fund_round(units(args.usdc, 6))
                 if args.reference:

@@ -24,7 +24,7 @@ The tracked [mainnet config](config/mainnet.json) contains these addresses and t
 cp config/mainnet.json config/live.json
 ```
 
-Keeper authorization, Vyper's approvals and funding are separate setup steps; the tracked config leaves `keeper` unset.
+Vyper approved a 2,000,000 CRV allowance and granted mint permission for this ProceedsEscrow on November 23, 2026. The public `keeper` address in the config is used by the manager setup and permission checks. [Vyper Safe transaction](https://etherscan.io/tx/0xb3d50bd851dc089a1c2f7ef6217e97daa7b5dce2e6d8640fc221549e907427e3)
 
 ## Permissions
 
@@ -49,7 +49,9 @@ All of the designated Yearn voter's weight on this gauge belongs to the programm
 
 There is no configured start or end date. Deployment captures the current week's share when its vote history is still available. If Yearn has no effective votes this week, the entire batch belongs to Vyper: `work()` either sends it USDC or retains its CRV, depending on the mode, even if Yearn has since voted for next week. Process historical pending rewards before the first boundary with a nonzero Yearn share. After that boundary, calls use the new week's share; there is no carryover split. Both sides accept small amounts crossing rollover under this convention. Stop or pause automation and coordinate the final settlement when the programme ends.
 
-Run frequently and make a best-effort **claim and sale in the last five minutes before Thursday 00:00 UTC**, allowing for the sale cooldown. A checkpoint alone does not clear pending rewards. After a substantial outage or an independent claim, stop normal automation and reconcile with Vyper before restarting. The contract does not detect stale rewards or reconstruct missed weeks. Already-minted CRV remaining in the multisig is available for subsequent sales.
+Settle rewards before the Thursday 00:00 UTC rollover where possible. A checkpoint alone leaves rewards pending. After a substantial outage or independent claim, reconcile with Vyper before resuming sales.
+
+Keeper automation lives in [brawny-jobs](https://github.com/wavey0x/brawny-jobs) under `jobs/yearn/vyper_grant.py`.
 
 ## Build and test
 
@@ -59,7 +61,7 @@ uv run --no-sync vyper-grant --out build build
 RUN_FORK_TESTS=1 uv run --no-sync pytest
 ```
 
-Build updates `abi/contracts.json` and the artifacts in `build/`. Commit generated artifacts with contract changes. Keeper/report runs load them without importing the compiler. Fork tests use `ETHEREUM_RPC_URL` and send no live transactions.
+Build updates `abi/contracts.json` and the artifacts in `build/`. Commit generated artifacts with contract changes. Reports load the committed artifacts. Fork tests use `ETHEREUM_RPC_URL` and send no live transactions.
 
 ## Deploy and fund
 
@@ -90,9 +92,9 @@ uv run vyper-grant doctor
 uv run vyper-grant setup --allowance-crv AGREED_CRV_ALLOWANCE
 ```
 
-Vyper grants the CRV allowance and mint permission; Yearn enables the keeper. Run `doctor` again after the batches execute. Deploy before Yearn votes if possible: the constructor can preserve this week's effective vote before the controller overwrites it. If history was already overwritten, deployment still succeeds, but sales need a manager-supplied missing weight for that week. A successful sale before the boundary clears the old rewards at this week's split. Neither contract requires an activation transaction.
+Vyper grants the CRV allowance and mint permission. Yearn sets the six-hour cooldown and enables the dedicated keeper and manager Safe. Run `doctor` again after the batches execute. Deploy before Yearn votes if possible: the constructor can preserve this week's effective vote before the controller overwrites it. If history was already overwritten, deployment still succeeds, but sales need a manager-supplied missing weight for that week. A successful sale before the boundary clears the old rewards at this week's split. Neither contract requires an activation transaction.
 
-The original `vyper-grant deploy funding|proceeds --deployer ADDRESS` commands remain available for unsigned deployments with another signer. All manager commands prepare Safe batches. Funding operations need no proceeds address; proceeds deployment, setup, management and the keeper need no funding address. The combined report reads both.
+The original `vyper-grant deploy funding|proceeds --deployer ADDRESS` commands remain available for unsigned deployments with another signer. All manager commands prepare Safe batches. Funding operations need no proceeds address; proceeds deployment, setup and management need no funding address. The combined report reads both.
 
 Transfer yvUSDC-1 shares to FundingEscrow. The vault is `0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204`; `previewWithdraw(amount)` gives the shares needed for a USDC amount at the current price. Each funding payment calls `withdraw(amount, recipient, self, 0)`, letting the vault calculate and burn the required shares with zero permitted loss. `assets()` reports the USDC value of the remaining shares, including yield. Loose USDC is not used for scheduled payments or included in that value; it can be recovered through management.
 
@@ -100,35 +102,23 @@ Transfer yvUSDC-1 shares to FundingEscrow. The vault is `0xBe53A109B494E5c9f97b9
 
 ```sh
 uv run vyper-grant fund-round --usdc 20000  # queue 10,000 at each of the next two boundaries
-uv run vyper-grant funding-keeper          # simulate the next funding payment
-uv run vyper-grant funding-keeper --send
-uv run vyper-grant checkpoint          # simulate a public vote snapshot
-uv run vyper-grant checkpoint --send
-uv run vyper-grant quote               # quote the batch using the configured sell_vyper mode
-uv run vyper-grant keeper              # simulate the next action
-uv run vyper-grant keeper --send
+uv run vyper-grant quote --crv 100          # read the USDC quote for 100 CRV
 uv run vyper-grant --out dashboard/dist report
 ```
 
 `fund_round(amount)` takes the total USDC amount (6 decimals on chain) and sends nothing immediately. It queues `amount // 2` for `(block.timestamp // WEEK + 1) * WEEK` and the same amount for one week later. Any rounding dust stays in the vault. These use the same Thursday 00:00 UTC boundaries as proceeds snapshots. Queue the round during the voting week, preferably alongside the vote; a transaction included after the boundary schedules the following two weeks. A new round requires the previous one to be completed or cancelled.
 
-Funding `canWork()` means a payment is pending and its boundary has arrived. Public `work()` has no parameters and releases exactly one payment to `recipient()`. A late call does not shift the second boundary; if both payments are overdue, two calls can settle them. There are no recurring payments, keeper permissions, weekly mappings or links to the proceeds contract. Funds stay invested in yvUSDC-1 until each withdrawal. Insufficient shares or unavailable vault liquidity revert the call and leave the payment pending; the keeper simulates before sending.
+Funding `canWork()` means a payment is pending and its boundary has arrived. Public `work()` has no parameters and releases exactly one payment to `recipient()`. A late call does not shift the second boundary; if both payments are overdue, two calls can settle them. There are no recurring payments, keeper permissions, weekly mappings or links to the proceeds contract. Funds stay invested in yvUSDC-1 until each withdrawal. Insufficient shares or unavailable vault liquidity revert the call and leave the payment pending.
 
 `cancel-round` prepares a manager cancellation; add `--governance` for ychad.eth. Cancellation clears only unpaid instalments. Recovering any yvUSDC-1 also cancels the unpaid schedule, so later deposits cannot revive it. The dashboard shows the next payment and records actual paid amounts separately from weekly proceeds.
 
 The proceeds contract reads the designated Yearn voter's actual gauge weight every week, independently of payments. Scheduling or paying a round does not cast votes or verify their commercial price. Call `checkpoint()` early in each programme week and before replacing Yearn's vote, preferably in the voting Safe's atomic batch. A missing snapshot is also captured by the first sale. If history was overwritten first, `set-missing-weight --week TIMESTAMP` prepares an archival lookup and manager batch for an unset snapshot.
 
-`claimable()` returns the multisig's existing CRV balance plus pending gauge rewards; use **eth_call** to simulate its gauge checkpoint. `quote(amount)` is a view returning expected USDC (6 decimals) for a supplied CRV amount (18 decimals), through TriCRV and the fixed crvUSD/USDC pool. The tooling reads both at the same block.
-
-The keeper chooses `amount = min(claimable(), max_crv)` using the configured batch limit (default **15,000 CRV**). With `sell_vyper: true` (the default), it quotes that full amount. Set `sell_vyper: false` to simulate `checkpoint()` at the same block and quote only `amount * share // 10**18`. It applies the default 50 bps discount to that quote and calls `work(min_out, amount, sell_vyper)`. The `quote` command uses the same calculation and returns the pull amount, swap amount and retained amount separately. There is no quote multiplier or growth buffer.
+`claimable()` returns the multisig's existing CRV balance plus pending gauge rewards; use **eth_call** to simulate its gauge checkpoint. `quote(amount)` is a view returning expected USDC (6 decimals) for a supplied CRV amount (18 decimals), through TriCRV and the fixed crvUSD/USDC pool. The read-only `quote --crv AMOUNT` command returns the supplied CRV amount and quoted USDC in base units.
 
 The contract claims pending rewards and pulls `min(receiver_balance, max_crv)`. In retention mode it splits that new batch in CRV, sells only Yearn's portion, and retains the remainder. No existing escrow CRV is sold, even when a later call switches back to `True`. Excess CRV above the pull cap stays in the multisig. The swap receives `min_out` unchanged; if less is available it still has to meet that absolute minimum. When Yearn's share is zero in retention mode, the batch is retained without a swap and `min_out` must be zero. An empty batch reverts. A transaction included after a week boundary uses the new week's split; in retention mode this can change the swap amount too, so refresh quotes after rollover. Failed transfers or swaps roll back the claim, pull and snapshot.
 
 `canWork()` is a view of global readiness: work must be unpaused and at least `cooldown()` seconds past `last_sale()`. The default and hard minimum are **600 seconds**. It does not check caller permissions, pending rewards, vote history or swap execution; keepers still quote and simulate the full call. Every successful `work()` updates `last_sale`, including a batch retained without a swap. Public checkpoints remain available during the cooldown.
-
-Schedule `ops/run.sh` every five minutes with `VYPER_GRANT_DIR` and `ETHEREUM_RPC_URL` set externally. The keeper checks `canWork()` before quoting; while waiting it can still capture a missing weekly snapshot. `ops/run.sh checkpoint` requests only a snapshot. Set `KEEPER_SEND=1` and `KEEPER_PRIVATE_KEY` for the dedicated signer. Nothing is scheduled by this repository. Configure the normal minimum trade, slippage and gas limit. Closing sales bypass the minimum trade threshold in each week's final five minutes, but still respect the batch cap. Drain any substantial backlog ahead of that window. Plan earlier sales so the cooldown expires in that window; a sale too early in the window can prevent another attempt closer to the boundary. All calls respect the cooldown and gas limit. Swaps require a positive quoted minimum; retention without a swap uses zero. A pending sale may land after the boundary and use the new split; its nonce can block later submissions until it is mined or manually replaced. If the closing sale misses the boundary, reconcile rather than assuming the next week's sale preserves the previous share. Stop automation and hand claims back to Vyper after the final cleanup.
-
-Run `ops/run.sh funding-keeper` on the same polling schedule for funding payments; it needs no proceeds address or keeper authorization. The default `ops/run.sh` continues to operate proceeds only. Use one host/signer and a shared output directory for the process lock. A pending nonce prevents another submission. After a response is lost, the next pass reads fresh claimable rewards; there is no signed-transaction journal or automatic fee replacement. Reports read the latest mined block.
 
 `set-recipient --account ADDRESS` changes the recipient of all unpaid funding instalments, including the current round. `set-keeper --account ADDRESS [--disable]`, `set-paused true|false`, and `set-cooldown --seconds INTEGER` (at least 600) manage sales. Cooldown changes apply immediately relative to the last successful sale. `set-yearn-receiver --account ADDRESS` prepares a manager batch to route future Yearn shares there. Use the proceeds contract's own address to resume accumulation. Zero is rejected; existing balances stay where they are.
 
@@ -136,7 +126,7 @@ Run `ops/run.sh funding-keeper` on the same polling schedule for funding payment
 
 `recover funding --token ADDRESS --amount-raw INTEGER` prepares a funding recovery to the manager; add `--governance` for a **ychad.eth** clawback to governance. Recover yvUSDC-1 shares directly to avoid relying on vault redemption. Recovering vault shares also cancels pending funding payments. Recovery is independent of the seller and the vault's withdrawal availability; it does not reverse payments already made. The governance address is pinned to its ENS resolution verified on November 10, 2026, not resolved dynamically by the contract.
 
-Funding amounts use 6-decimal USDC; proceeds quotes, minimums, balances and allocations also use 6-decimal USDC. The quote command returns `usdc`, keeper output uses `min_usdc`, and reports use `forwarded_usdc` / `withdrawn_usdc`.
+Funding amounts use 6-decimal USDC; proceeds quotes, minimums, balances and allocations also use 6-decimal USDC. Reports read the latest mined block and distinguish forwarded and withdrawn USDC.
 
 ## Dashboard
 

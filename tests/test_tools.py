@@ -28,18 +28,13 @@ def test_config_and_decimal_validation(tmp_path):
     c = json.loads((ROOT / "config/example.json").read_text())
     p = tmp_path / "config.json"
     p.write_text(json.dumps(c))
-    assert "start" not in load_config(p) and "weeks" not in load_config(p)
-    c["slippage_bps"] = 10000
-    p.write_text(json.dumps(c))
-    with pytest.raises(ValueError, match="Slippage"):
-        load_config(p)
-    c.update(slippage_bps=50, max_crv="99")
-    p.write_text(json.dumps(c))
-    with pytest.raises(ValueError, match="Maximum CRV"):
-        load_config(p)
-    c.update(max_crv="15000", sell_vyper="false")
-    p.write_text(json.dumps(c))
-    with pytest.raises(ValueError, match="sell_vyper"):
+    assert load_config(p) == c
+    old = dict(c, min_trade_crv="100", max_crv="15000", sell_vyper=True,
+               slippage_bps=50, max_gas_gwei="20")
+    p.write_text(json.dumps(old))
+    assert load_config(p) == c
+    p.write_text(json.dumps(dict(c, deployment_block="100")))
+    with pytest.raises(ValueError, match="deployment_block"):
         load_config(p)
     assert units("0.000001", 6) == 1
     assert units("100000.000000000000000001") == 100000 * 10**18 + 1
