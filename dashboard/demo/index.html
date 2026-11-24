@@ -55,14 +55,14 @@ svg{display:block;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;strok
 main{padding-top:20px;padding-bottom:48px}
 .notice{margin:0 0 10px;font-size:12px;color:var(--warn)}
 .card{border-radius:8px;background:var(--surface);box-shadow:var(--card)}
-.overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:0;padding:16px 0}
+.overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:14px;padding:14px 0}
 .stat{min-width:0;padding:0 20px}.stat+.stat{border-left:1px solid var(--soft)}
-.stat strong{display:block;font:500 20px/26px var(--mono);letter-spacing:-.4px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat strong,.figure strong{display:block;font:500 16px/22px var(--mono);letter-spacing:-.3px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .unit{margin-left:6px;font:11px var(--sans);letter-spacing:0;color:var(--muted)}
 .token{display:inline-block;width:13px;height:13px;margin-right:4px;vertical-align:-2px;background:center/contain no-repeat}
 .usdc{background-image:url(data:image/png;base64,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)}
 .crv{background-image:url(data:image/png;base64,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)}
-.label{display:block;margin-top:1px;font-size:11px;color:var(--muted)}
+.label{display:block;margin-top:1px;font-size:11px;color:var(--muted)}.label .act{width:16px;height:16px;margin-left:2px}
 .sub{display:flex;align-items:center;gap:8px;min-height:24px;margin:8px 0 0;font-size:12px;color:var(--muted)}.sub:empty{display:none}
 .button{padding:3px 10px;border:1px solid var(--strong);border-radius:6px;background:var(--surface);font-size:12px}
 .button.primary{border-color:var(--ink);background:var(--ink);color:var(--bg)}.button:disabled{opacity:.5;cursor:default}
@@ -73,10 +73,12 @@ main{padding-top:20px;padding-bottom:48px}
 .tabs button:hover,.tabs button[aria-selected=true]{color:var(--ink)}.tabs button[aria-selected=true]{border-color:var(--accent)}
 .count{margin-left:6px;padding:1px 6px;border-radius:4px;background:var(--soft);color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}.count:empty{display:none}
 .none{margin:0;padding:28px 16px;text-align:center;color:var(--muted)}
-.chart{margin-top:14px;padding:14px 16px 8px}
-.legend{display:flex;gap:16px;margin:0 0 4px;font-size:11px;color:var(--muted)}
+.chart{padding:16px 16px 8px}
+.figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:0 4px 12px}
+.figure{min-width:0}.figure+.figure{padding-left:20px;border-left:1px solid var(--soft)}
+.figure strong{font-size:24px;line-height:30px;letter-spacing:-.5px}.figure .label{margin-top:2px}
 .key{display:inline-block;width:12px;height:2px;margin-right:6px;border-radius:1px;vertical-align:middle;background:var(--accent)}.key.budget{background:var(--second)}
-#plot{position:relative}#plot svg{overflow:visible;stroke-width:1;touch-action:pan-y}#plot svg:focus-visible{outline:2px solid var(--muted);outline-offset:4px}
+#plot{position:relative;min-height:190px}#plot svg{overflow:visible;stroke-width:1;touch-action:pan-y}#plot svg:focus-visible{outline:2px solid var(--muted);outline-offset:4px}
 .grid{stroke:var(--soft)}.goal{stroke:var(--muted);stroke-dasharray:2 4}.cross{stroke:var(--strong)}
 .line{stroke-width:2}.line.proceeds{stroke:var(--accent)}.line.budget{stroke:var(--second)}.wash{stroke:none;fill:var(--accent);opacity:.1}
 .dot{stroke:var(--surface);stroke-width:2}.dot.proceeds{fill:var(--accent)}.dot.budget{fill:var(--second)}
@@ -93,6 +95,7 @@ th:first-child,td:first-child,.text{text-align:left}td:first-child,td.text{font-
 tbody tr{transition:background .12s}tbody tr:hover{background:var(--hover)}tbody tr:last-child td{border-bottom:0}
 td.empty{color:var(--faint)}td .token{margin:0 0 0 5px}
 td.link{padding:0 12px 0 0}
+.to{margin:0 6px;color:var(--faint)}.sub .token{margin:0 0 0 4px}td .ref{font-family:var(--sans)}.ref.party{font-family:var(--mono)}
 .about td{height:auto;padding-top:10px;padding-bottom:10px;vertical-align:top;font-family:var(--sans);text-align:left;white-space:normal}
 .about td:first-child,.aside{color:var(--muted)}.about td:first-child{white-space:nowrap}.aside{margin-left:6px}
 .ref{border-bottom:1px solid var(--strong)}.ref:hover{border-color:var(--ink)}
@@ -103,9 +106,16 @@ td.link{padding:0 12px 0 0}
 tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 .check,.act.copied .copy{display:none}.act.copied .check{display:block}.act.copied{color:var(--live)}
 @media(hover:none){.address .act{opacity:1}}
-/* Shared column widths line Yearn and Vyper up across the tables. */
-@media(min-width:960px){table{table-layout:fixed}.c-date{width:17%}.c-num{width:15%}.c-wide{width:31%}.c-link{width:44px}}
-@media(max-width:600px){.bar,main{padding-left:16px;padding-right:16px}.overview{grid-template-columns:1fr;padding:4px 0}.stat{padding:12px 16px}.stat+.stat{border-left:0;border-top:1px solid var(--soft)}.full{display:none}.short{display:inline}.address .act{opacity:1}}
+@media(min-width:960px){table{table-layout:fixed}.c-date{width:17%}.c-num{width:15%}.c-wide{width:31%}.c-link{width:44px}.h-age{width:12%}.h-num{width:14%}.h-paid{width:27%}}
+@media(max-width:600px){.bar,main{padding-left:16px;padding-right:16px}.overview{grid-template-columns:1fr;padding:4px 0}.stat{padding:12px 16px}.stat+.stat{border-left:0;border-top:1px solid var(--soft)}.full{display:none}.short{display:inline}.address .act{opacity:1}
+  .figure strong{font-size:19px;line-height:26px}.figure+.figure{padding-left:14px}.figure .unit{font-size:0}
+  /* History rows stack: the event with its time and link, then each amount under its own name. */
+  #history table,#history tbody{display:block}#history thead{display:none}
+  #history tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;padding:11px 16px;border-bottom:1px solid var(--soft)}
+  #history tr:last-child{border-bottom:0}#history tr::before{content:"";order:4;flex-basis:100%}
+  #history td{order:5;height:auto;padding:0;border:0;text-align:left}#history td.empty{display:none}
+  #history td.text{order:1;flex:1 1 auto;font-size:13px}#history td:first-child{order:2;font-size:11px;color:var(--muted)}#history td.link{order:3}
+  #history td[data-label]::before{content:attr(data-label);margin-right:6px;font:11px var(--sans);color:var(--muted)}}
 @media(prefers-reduced-motion:reduce){.dot::after{animation:none}}
 </style>
 <header class="topbar"><div class="bar">
@@ -120,14 +130,17 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 <h1 class="visually-hidden">Vyper funding</h1>
 <p class="notice" id="demo" hidden>Illustrative data</p>
 <div id="notices" role="status"></div>
-<section class="overview card" aria-label="Balances">
-<div class="stat"><strong><span id="funding">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span>USDC</span></strong><span class="label">Funding</span><p class="sub" id="next"></p></div>
-<div class="stat"><strong><span id="proceeds">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span>USDC</span></strong><span class="label">Proceeds</span></div>
-<div class="stat"><strong><span id="vyper-crv">—</span><span class="unit"><span class="token crv" aria-hidden="true"></span>CRV</span></strong><span class="label">Vyper CRV</span><p class="sub" id="claim-row" hidden><button class="button" id="claim" type="button">Connect</button><span id="claim-status"></span></p></div>
-</section>
-<section class="card chart" id="chart" aria-label="Progress" hidden>
-<p class="legend"><span><i class="key"></i>Proceeds</span><span><i class="key budget"></i>Budget left</span></p>
+<section class="card chart" id="chart" aria-label="Progress">
+<div class="figures">
+<div class="figure"><strong><span id="earned">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span>USDC</span></strong><span class="label"><i class="key"></i>Yearn proceeds · target <span class="cap"></span></span></div>
+<div class="figure"><strong><span id="spent">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span>USDC</span></strong><span class="label"><i class="key budget"></i>Budget spent · cap <span class="cap"></span></span></div>
+</div>
 <div id="plot"></div>
+</section>
+<section class="overview card" aria-label="Holdings">
+<div class="stat"><strong><span id="funding">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span>USDC</span></strong><span class="label">Funding escrow<span id="funding-link"></span></span><p class="sub" id="next"></p></div>
+<div class="stat"><strong><span id="proceeds">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span>USDC</span></strong><span class="label">Proceeds escrow<span id="proceeds-link"></span></span></div>
+<div class="stat"><strong><span id="vyper-crv">—</span><span class="unit"><span class="token crv" aria-hidden="true"></span>CRV</span></strong><span class="label">Held for Vyper<span id="vyper-link"></span></span><p class="sub" id="claim-row" hidden><button class="button" id="claim" type="button">Claim CRV</button><span id="claim-status"></span></p></div>
 </section>
 <div id="views" hidden>
 <div class="tabs" role="tablist" aria-label="Views">
@@ -135,8 +148,8 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 <button id="tab-weeks" type="button" role="tab" aria-controls="weekly" data-view="weeks">Weeks<span class="count" id="weekly-count"></span></button>
 <button id="tab-info" type="button" role="tab" aria-controls="info" data-view="info">Info</button>
 </div>
-<section class="card scroll" id="history" role="tabpanel" aria-labelledby="tab-history"><table><thead><tr><th scope="col" class="c-date" id="time-head">Age</th><th scope="col" class="text">Action</th><th scope="col" class="c-num">Claimed</th><th scope="col" class="c-num">Yearn</th><th scope="col" class="c-wide">Vyper</th><th scope="col" class="c-link"><span class="visually-hidden">Transaction</span></th></tr></thead><tbody id="transactions"></tbody></table><p class="none">No transactions yet</p></section>
-<section class="card scroll" id="weekly" role="tabpanel" aria-labelledby="tab-weeks"><table><thead><tr><th scope="col">Week</th><th scope="col" class="c-num">Yearn share</th><th scope="col" class="c-num">Yearn</th><th scope="col" class="c-wide">Vyper</th><th class="c-link"></th></tr></thead><tbody id="weeks"></tbody></table><p class="none">No weeks yet</p></section>
+<section class="card scroll" id="history" role="tabpanel" aria-labelledby="tab-history"><table><thead><tr><th scope="col" class="h-age" id="time-head">Age</th><th scope="col" class="text">Event</th><th scope="col" class="h-num">Claimed</th><th scope="col" class="h-num">Yearn</th><th scope="col" class="h-num">Vyper</th><th scope="col" class="h-paid">Paid out</th><th scope="col" class="c-link"><span class="visually-hidden">Transaction</span></th></tr></thead><tbody id="transactions"></tbody></table><p class="none">No transactions yet</p></section>
+<section class="card scroll" id="weekly" role="tabpanel" aria-labelledby="tab-weeks"><table><thead><tr><th scope="col">Week</th><th scope="col" class="c-num">Yearn share</th><th scope="col" class="c-num">Yearn</th><th scope="col" class="c-wide">Vyper</th></tr></thead><tbody id="weeks"></tbody></table><p class="none">No weeks yet</p></section>
 <section id="info" role="tabpanel" aria-labelledby="tab-info">
 <div class="card scroll"><table><thead><tr><th scope="col" class="c-date">Contract</th><th scope="col" class="text">Address</th></tr></thead><tbody id="addresses"></tbody></table><p class="none">No contracts</p></div>
 <div class="card scroll"><table class="about"><colgroup><col class="c-date"><col></colgroup><thead><tr><th scope="col" colspan="2">What is this?</th></tr></thead><tbody>
@@ -151,7 +164,7 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 <template id="icon-copy"><svg class="copy" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="6" y="2.5" width="7" height="9" rx="1.5"/><path d="M6 5.5H4.5A1.5 1.5 0 0 0 3 7v6a1.5 1.5 0 0 0 1.5 1.5h4A1.5 1.5 0 0 0 10 13v-1.5"/></svg></template>
 <template id="icon-check"><svg class="check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg></template>
 <script>
-let report={"demo": true, "as_of": "1794250000", "funding": "0x3602642D28fA686ff74d4C85aF5B6fBe8722CCD8", "funding_recipient": "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8", "funding_next_week": "1794441600", "funding_payments": ["10000000000", "10000000000"], "proceeds": "0x38cf14DaC1329ff404739379004909c6847ab3aC", "start": "1792627200", "yearn_receiver": "0x38cf14DaC1329ff404739379004909c6847ab3aC", "forwarded_usdc": "0", "payments": [{"usdc": "6000000000", "recipient": "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8", "timestamp": "1792627920", "tx": "0x0000000000000000000000000000000000000000000000000000000000000001"}, {"usdc": "6000000000", "recipient": "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8", "timestamp": "1793232420", "tx": "0x0000000000000000000000000000000000000000000000000000000000000004"}], "spent": "12000000000", "funding_assets": "88420000000", "proceeds_balance": "15600000000", "vyper_crv_balance": "8000000000000000000000", "transactions": [{"tx": "0x0000000000000000000000000000000000000000000000000000000000000007", "timestamp": "1794236520", "kind": "work", "week": "1793836800", "share": "600000000000000000", "crv": "20000000000000000000000", "yearn_usdc": "4560000000", "vyper_usdc": "0", "vyper_crv": "8000000000000000000000"}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000006", "timestamp": "1793812800", "kind": "work", "week": "1793232000", "share": "625000000000000000", "crv": "24000000000000000000000", "yearn_usdc": "6000000000", "vyper_usdc": "3600000000", "vyper_crv": "0"}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000005", "timestamp": "1793266860", "kind": "checkpoint", "week": "1793232000", "share": "625000000000000000", "manual": false}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000004", "timestamp": "1793232420", "kind": "payment", "usdc": "6000000000"}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000003", "timestamp": "1793203500", "kind": "work", "week": "1792627200", "share": "600000000000000000", "crv": "21000000000000000000000", "yearn_usdc": "5040000000", "vyper_usdc": "3360000000", "vyper_crv": "0"}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000002", "timestamp": "1792679400", "kind": "checkpoint", "week": "1792627200", "share": "600000000000000000", "manual": false}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000001", "timestamp": "1792627920", "kind": "payment", "usdc": "6000000000"}], "totals": {"sold": "57000000000000000000000", "output": "22560000000", "yearn": "15600000000", "vyper_crv": "8000000000000000000000"}, "weeks": [{"week": "1792627200", "sold": "21000000000000000000000", "output": "8400000000", "yearn": "5040000000", "vyper_crv": "0", "ready": true, "share": "600000000000000000", "active": true, "status": "Closed"}, {"week": "1793232000", "sold": "24000000000000000000000", "output": "9600000000", "yearn": "6000000000", "vyper_crv": "0", "ready": true, "share": "625000000000000000", "active": true, "status": "Closed"}, {"week": "1793836800", "sold": "12000000000000000000000", "output": "4560000000", "yearn": "4560000000", "vyper_crv": "8000000000000000000000", "ready": true, "share": "600000000000000000", "active": true, "status": "Active"}], "withdrawn_usdc": "0", "withdrawn_crv": "0", "warnings": []};
+let report={"demo": true, "as_of": "1794250000", "funding": "0x3602642D28fA686ff74d4C85aF5B6fBe8722CCD8", "funding_recipient": "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8", "funding_next_week": "1794441600", "funding_payments": ["10000000000", "10000000000"], "proceeds": "0x38cf14DaC1329ff404739379004909c6847ab3aC", "start": "1792627200", "yearn_receiver": "0x38cf14DaC1329ff404739379004909c6847ab3aC", "forwarded_usdc": "0", "payments": [{"usdc": "6000000000", "recipient": "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8", "timestamp": "1792627920", "tx": "0x0000000000000000000000000000000000000000000000000000000000000001"}, {"usdc": "6000000000", "recipient": "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8", "timestamp": "1793232420", "tx": "0x0000000000000000000000000000000000000000000000000000000000000004"}], "spent": "12000000000", "funding_assets": "88420000000", "proceeds_balance": "15600000000", "vyper_crv_balance": "5000000000000000000000", "transactions": [{"tx": "0x0000000000000000000000000000000000000000000000000000000000000008", "timestamp": "1794244200", "kind": "withdrawal", "token": "0xD533a949740bb3306d119CC777fa900bA034cd52", "amount": "3000000000000000000000", "recipient": "0x70CCBE10F980d80b7eBaab7D2E3A73e87D67B775"}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000007", "timestamp": "1794236520", "kind": "work", "week": "1793836800", "share": "600000000000000000", "crv": "20000000000000000000000", "yearn_usdc": "4560000000", "vyper_usdc": "0", "vyper_crv": "8000000000000000000000"}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000006", "timestamp": "1793812800", "kind": "work", "week": "1793232000", "share": "625000000000000000", "crv": "24000000000000000000000", "yearn_usdc": "6000000000", "vyper_usdc": "3600000000", "vyper_crv": "0"}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000005", "timestamp": "1793266860", "kind": "checkpoint", "week": "1793232000", "share": "625000000000000000", "manual": false}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000004", "timestamp": "1793232420", "kind": "payment", "usdc": "6000000000", "recipient": "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8"}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000003", "timestamp": "1793203500", "kind": "work", "week": "1792627200", "share": "600000000000000000", "crv": "21000000000000000000000", "yearn_usdc": "5040000000", "vyper_usdc": "3360000000", "vyper_crv": "0"}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000002", "timestamp": "1792679400", "kind": "checkpoint", "week": "1792627200", "share": "600000000000000000", "manual": false}, {"tx": "0x0000000000000000000000000000000000000000000000000000000000000001", "timestamp": "1792627920", "kind": "payment", "usdc": "6000000000", "recipient": "0xb911Fcce8D5AFCEc73E072653107260bb23C1eE8"}], "totals": {"sold": "57000000000000000000000", "output": "22560000000", "yearn": "15600000000", "vyper_crv": "8000000000000000000000"}, "weeks": [{"week": "1792627200", "sold": "21000000000000000000000", "output": "8400000000", "yearn": "5040000000", "vyper_crv": "0", "ready": true, "share": "600000000000000000", "active": true, "status": "Closed"}, {"week": "1793232000", "sold": "24000000000000000000000", "output": "9600000000", "yearn": "6000000000", "vyper_crv": "0", "ready": true, "share": "625000000000000000", "active": true, "status": "Closed"}, {"week": "1793836800", "sold": "12000000000000000000000", "output": "4560000000", "yearn": "4560000000", "vyper_crv": "8000000000000000000000", "ready": true, "share": "600000000000000000", "active": true, "status": "Active"}], "withdrawn_usdc": "0", "withdrawn_crv": "3000000000000000000000", "warnings": []};
 // A page with no embedded report is the hosted one: it loads report.json and keeps polling.
 const live = Boolean(report.live) || !Object.keys(report).length;
 const POLL_MS = 10_000, STALE_MINUTES = 10;
@@ -222,13 +235,50 @@ const split = (usdc, crv) => {
   }
   return parts.length ? parts : '—';
 };
-// A cell is text, a node or a list of both; `classes` names cells by position.
-const row = (body, values, classes = {}) => {
+// Tokens the escrows send out, and addresses worth a name beside those the report supplies.
+const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+const TOKENS = {
+  [USDC]: ['USDC', 6],
+  '0xd533a949740bb3306d119cc777fa900ba034cd52': ['CRV', 18],
+  '0xbe53a109b494e5c9f97b9cd39fe969be68bf6204': ['yvUSDC-1', 6],
+};
+const NAMED = {
+  '0xb911fcce8d5afcec73e072653107260bb23c1ee8': 'Fee burner',
+  '0x70ccbe10f980d80b7ebaab7d2e3a73e87d67b775': 'Vyper multisig',
+};
+const isAddress = value => /^0x[0-9a-fA-F]{40}$/.test(value ?? '');
+const same = (a, b) => isAddress(a) && a.toLowerCase() === b.toLowerCase();
+// A recipient, linked: a name where one is known, else the short address.
+const party = value => {
+  if (!isAddress(value)) return [];
+  const name = same(report.vyper_crv_claim?.safe, value) ? 'Vyper multisig'
+    : same(report.proceeds, value) ? 'Proceeds escrow'
+    : same(report.funding, value) ? 'Funding escrow' : NAMED[value.toLowerCase()];
+  const a = document.createElement('a');
+  a.className = name ? 'ref' : 'ref party';
+  a.href = 'https://etherscan.io/address/' + value;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.title = value;
+  a.textContent = name ?? short(value);
+  return [span('to', '→'), a];
+};
+// An amount leaving an escrow, with where it went.
+const paid = (value, sent, recipient) => {
+  const [symbol, decimals] = TOKENS[sent?.toLowerCase()] ?? [];
+  const sum = !symbol ? [String(value), span('unit', isAddress(sent) ? short(sent) : '')]
+    : [amount(value, decimals), symbol === 'yvUSDC-1' ? span('unit', symbol) : token(symbol)];
+  return [...sum, ...party(recipient)];
+};
+// A cell is text, a node or a list of both. `classes` names cells by position, and
+// `labels` gives each cell the column name it shows on a phone, where rows stack.
+const row = (body, values, classes = {}, labels = []) => {
   const tr = document.createElement('tr');
   values.forEach((value, i) => {
     const td = document.createElement('td');
     td.append(...[value].flat());
     td.className = classes[i] ?? (value === '—' ? 'empty' : '');
+    if (labels[i]) td.dataset.label = labels[i];
     tr.append(td);
   });
   el(body).append(tr);
@@ -268,9 +318,9 @@ const time = ts => {
   return node;
 };
 
-// Progress chart: cumulative Yearn proceeds climbing to the target, and the budget left
-// after each funding payment. Both are USDC on one axis, drawn as steps because they
-// only change when a transaction lands.
+// Progress chart: Yearn's cumulative proceeds climbing to the target, and its cumulative
+// spend climbing to the cap. Both are USDC on one axis, drawn as steps because they only
+// change when a transaction lands.
 const TARGET = 100_000;  // USDC: the proposal's funding target, and its spending cap
 const usd = x => Number(big(x) / 10n ** 4n) / 100;
 const compact = v => {
@@ -285,20 +335,20 @@ const svg = (tag, attrs = {}, text) => {
   return node;
 };
 function renderChart() {
-  el('chart').hidden = !report.as_of;
   const plot = el('plot'), W = plot.clientWidth;
   if (!report.as_of || !W) return;
 
   const t1 = Number(report.as_of), t0 = Math.min(Number(report.start) || t1 - 604800, t1 - 1);
-  const steps = (from, events) => {
-    let value = from;
-    return [[t0, from], ...events.sort((a, b) => a[0] - b[0])
-      .map(([t, change]) => [Math.min(Math.max(t, t0), t1), value = Math.max(0, value + change)])];
+  const steps = events => {
+    let value = 0;
+    return [[t0, 0], ...events.sort((a, b) => a[0] - b[0])
+      .map(([t, change]) => [Math.min(Math.max(t, t0), t1), value += change])];
   };
+  // Drawn in this order, so the proceeds line sits on top where the two overlap.
   const lines = [
-    ['proceeds', 'Proceeds', steps(0, (report.transactions ?? []).filter(t => t.kind === 'work')
+    ['budget', 'Budget spent', steps((report.payments ?? []).map(p => [Number(p.timestamp), usd(p.usdc)]))],
+    ['proceeds', 'Yearn proceeds', steps((report.transactions ?? []).filter(t => t.kind === 'work')
       .map(t => [Number(t.timestamp), usd(t.yearn_usdc)]))],
-    ['budget', 'Budget left', steps(TARGET, (report.payments ?? []).map(p => [Number(p.timestamp), -usd(p.usdc)]))],
   ];
   const at = (points, t) => points.reduce((value, [time, v]) => time <= t ? v : value, points[0][1]);
   const last = points => points[points.length - 1][1];
@@ -308,13 +358,13 @@ function renderChart() {
   const x = t => left + (t - t0) / (t1 - t0) * (right - left);
   const y = v => bottom - v / peak * (bottom - top);
   const root = svg('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', tabindex: 0,
-    'aria-label': `Proceeds ${money(last(lines[0][2]))} of the ${money(TARGET)} USDC target. Budget left ${money(last(lines[1][2]))} USDC.`});
+    'aria-label': `Yearn proceeds ${money(last(lines[1][2]))} of the ${money(TARGET)} USDC target. Budget spent ${money(last(lines[0][2]))} of the ${money(TARGET)} USDC cap.`});
 
   for (let v = 0; v <= peak; v += TARGET / 2) {
     root.append(svg('line', {class: v === TARGET ? 'goal' : 'grid', x1: left, x2: right, y1: y(v), y2: y(v)}),
       svg('text', {class: 'tick', x: left - 8, y: y(v) + 4, 'text-anchor': 'end'}, compact(v)));
   }
-  root.append(svg('text', {class: 'tick', x: right, y: y(TARGET) - 7, 'text-anchor': 'end'}, 'Target'));
+  root.append(svg('text', {class: 'tick', x: right, y: y(TARGET) - 7, 'text-anchor': 'end'}, 'Target · cap'));
   const weeks = Math.floor((t1 - t0) / 604800), stride = Math.max(1, Math.ceil(weeks / Math.max(1, Math.floor((right - left) / 90))));
   for (let k = 0; k <= weeks; k += stride) {
     root.append(svg('text', {class: 'tick', x: x(t0 + k * 604800), y: H - 4, 'text-anchor': k ? 'middle' : 'start'}, day(t0 + k * 604800)));
@@ -326,20 +376,21 @@ function renderChart() {
   // End labels sit beside their dots, nudged apart when the two lines finish close together.
   const ends = lines.map(line => y(last(line[2])));
   const order = ends[0] <= ends[1] ? [0, 1] : [1, 0];
-  const labels = [...ends];
-  if (Math.abs(ends[0] - ends[1]) < 14) {
+  const labels = [...ends], tied = ends[0] === ends[1];
+  if (!tied && Math.abs(ends[0] - ends[1]) < 14) {
     const middle = (ends[0] + ends[1]) / 2;
     labels[order[0]] = middle - 7;
     labels[order[1]] = middle + 7;
   }
   const trace = points => points.map(([t, v], n) => n ? `H${x(t)}V${y(v)}` : `M${x(t)} ${y(v)}`).join('') + `H${right}`;
-  root.append(svg('path', {class: 'wash', d: trace(lines[0][2]) + `V${bottom}H${left}Z`}));
+  root.append(svg('path', {class: 'wash', d: trace(lines[1][2]) + `V${bottom}H${left}Z`}));
   for (const [name, , points] of lines) {
     root.append(svg('path', {class: 'line ' + name, 'stroke-linejoin': 'round', d: trace(points)}));
   }
   lines.forEach(([name, , points], i) => {
-    root.append(svg('circle', {class: 'dot ' + name, cx: right, cy: ends[i], r: 4}),
-      svg('text', {class: 'end', x: right + 9, y: labels[i] + 4}, compact(last(points))));
+    root.append(svg('circle', {class: 'dot ' + name, cx: right, cy: ends[i], r: 4}));
+    // Two lines ending on the same value share one label.
+    if (!tied || i) root.append(svg('text', {class: 'end', x: right + 9, y: labels[i] + 4}, compact(last(points))));
   });
 
   // Hover or focus reads every series at one moment; arrow keys walk the transactions.
@@ -364,7 +415,7 @@ function renderChart() {
       marks[i].setAttribute('visibility', 'visible');
       key.className = 'key ' + name;
       line.append(key, Object.assign(document.createElement('strong'), {textContent: money(value)}), title);
-      tip.append(line);
+      date.after(line);
     });
     tip.hidden = false;
     tip.style.left = x(t) > W / 2 ? '' : x(t) + 12 + 'px';
@@ -425,14 +476,24 @@ function renderReport() {
     p.textContent = warning;
     el('notices').append(p);
   }
+  for (const node of document.querySelectorAll('.cap')) node.textContent = TARGET.toLocaleString('en-US');
+  const next = document.createElement('span');
   if (report.funding_assets != null) {
+    el('earned').textContent = amount(report.totals?.yearn, 6);
+    el('spent').textContent = amount(report.spent, 6);
     el('funding').textContent = amount(report.funding_assets, 6);
     el('proceeds').textContent = amount(report.proceeds_balance, 6);
     el('vyper-crv').textContent = amount(report.vyper_crv_balance, 18);
+    if (big(report.funding_next_week) > 0n) {
+      next.append('Next ', amount(report.funding_payments?.[0], 6), token('USDC'),
+        ' · ' + day(report.funding_next_week), ...party(report.funding_recipient));
+    } else next.textContent = 'No payment scheduled';
   }
-  el('next').textContent = '';
-  if (big(report.funding_next_week) > 0n) {
-    el('next').textContent = 'Next ' + amount(report.funding_payments?.[0], 6) + ' · ' + day(report.funding_next_week);
+  el('next').replaceChildren(...(next.childNodes.length ? [next] : []));
+  // Each holding links to the contract that holds it; Vyper's CRV sits in the proceeds escrow.
+  for (const [id, key, name] of [['funding-link', 'funding', 'Funding escrow'],
+                                 ['proceeds-link', 'proceeds', 'Proceeds escrow'], ['vyper-link', 'proceeds', 'Proceeds escrow']]) {
+    el(id).replaceChildren(...(isAddress(report[key]) ? [etherscan('address/' + report[key], name + ' on Etherscan')] : []));
   }
 
   for (const week of [...report.weeks ?? []].reverse()) {
@@ -441,21 +502,27 @@ function renderReport() {
       week.ready ? pct(bps(week.share)) : '—',
       split(week.yearn, 0),
       split(big(week.output) - big(week.yearn), week.vyper_crv),
-      '',
     ]);
   }
 
-  const cells = {1: 'text', 5: 'link'};
+  // A claim is split between Yearn and Vyper; anything leaving an escrow is listed with where it went.
+  const cells = {1: 'text', 6: 'link'}, names = ['', '', 'Claimed', 'Yearn', 'Vyper', 'Paid'];
   for (const t of report.transactions ?? []) {
     if (!/^0x[0-9a-fA-F]{64}$/.test(t.tx ?? '')) continue;
     const date = time(t.timestamp), link = etherscan('tx/' + t.tx, 'View transaction on Etherscan');
+    const add = (event, claimed, yearn, vyper, out) =>
+      row('transactions', [date, event, claimed, yearn, vyper, out, link], cells, names);
     if (t.kind === 'work') {
-      row('transactions', [date, 'Work', [amount(t.crv, 18), token('CRV')], split(t.yearn_usdc, 0), split(t.vyper_usdc, t.vyper_crv), link], cells);
+      add(big(t.crv) > big(t.vyper_crv) ? 'Sale' : 'Retained', [amount(t.crv, 18), token('CRV')],
+        split(t.yearn_usdc, 0), split(t.vyper_usdc, t.vyper_crv), '—');
     } else if (t.kind === 'checkpoint') {
       const yearn = bps(t.share);
-      row('transactions', [date, t.manual ? 'Manual weight' : 'Checkpoint', '—', pct(yearn), pct(10000n - yearn), link], cells);
+      add(t.manual ? 'Manual split' : 'Weekly split', '—', pct(yearn), pct(10000n - yearn), '—');
     } else if (t.kind === 'payment') {
-      row('transactions', [date, 'Payment', '—', '—', split(t.usdc, 0), link], cells);
+      // Reports from before recipients were recorded fall back to the current one.
+      add('Incentive payment', '—', '—', '—', paid(t.usdc, USDC, t.recipient ?? report.funding_recipient));
+    } else if (t.kind === 'withdrawal' || t.kind === 'recovery') {
+      add(t.kind === 'withdrawal' ? 'Withdrawal' : 'Recovery', '—', '—', '—', paid(t.amount, t.token, t.recipient));
     }
   }
 
@@ -517,7 +584,6 @@ const status = message => { el('claim-status').textContent = message; };
 let account = null;
 const isSafe = () => Boolean(account && account.toLowerCase() === report.vyper_crv_claim?.safe.toLowerCase());
 const show = () => {
-  button.textContent = isSafe() ? 'Claim' : 'Connect';
   button.classList.toggle('primary', isSafe());
   status(account && !isSafe() ? short(account) + ' is not the Vyper multisig' : '');
 };
@@ -535,17 +601,15 @@ button.onclick = async () => {
   button.disabled = true;
   try {
     const wallet = await mainnet();
-    if (!isSafe()) {
-      [account] = await wallet.request({method: 'eth_requestAccounts'});
-      show();
-    } else {
-      const claim = report.vyper_crv_claim;
-      const hash = await wallet.request({
-        method: 'eth_sendTransaction',
-        params: [{from: claim.safe, to: claim.to, data: claim.data, value: '0x0'}],
-      });
-      status('Submitted ' + short(hash));
-    }
+    if (!isSafe()) [account] = await wallet.request({method: 'eth_requestAccounts'});
+    show();
+    if (!isSafe()) return;
+    const claim = report.vyper_crv_claim;
+    const hash = await wallet.request({
+      method: 'eth_sendTransaction',
+      params: [{from: claim.safe, to: claim.to, data: claim.data, value: '0x0'}],
+    });
+    status('Submitted ' + short(hash));
   } catch (error) {
     status(error?.message ?? String(error));
   } finally {

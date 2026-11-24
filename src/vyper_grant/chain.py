@@ -162,7 +162,13 @@ def report(client, c, *, head=None):
         vyper_crv_balance=vyper_crv,
         vyper_crv_claim=vyper_crv_claim(proceeds, vyper_crv),
         transactions=activity(
-            events(proceeds.events.Snapshot()), sales, drawn, shares, timestamp
+            events(proceeds.events.Snapshot()),
+            sales,
+            drawn,
+            shares,
+            timestamp,
+            withdrawals,
+            events(funding.events.Recovered()),
         ),
         totals={
             k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "yearn", "vyper_crv"]
@@ -192,23 +198,28 @@ def vyper_crv_claim(proceeds, amount):
     return dict(safe=safe, to=proceeds.address, data=call._encode_transaction_data())
 
 
-def activity(snapshots, sales, payments, shares, timestamp):
-    """One row per checkpoint, work or funding payment transaction, newest first.
+def activity(snapshots, sales, payments, shares, timestamp, withdrawals=(), recoveries=()):
+    """One row per checkpoint or work transaction and per transfer out, newest first.
 
-    A work call that records the week's share also emits Snapshot; it is
-    shown once, as work. CRV withdrawals are not listed.
+    A work call that records the week's share also emits Snapshot; it is shown
+    once, as work. Funding payments, proceeds withdrawals and funding recoveries
+    each get their own row naming the recipient, so a Safe batch that sends
+    several in one transaction lists them all.
     """
-    rows = {}
+    rows, transfers = {}, []
+
+    def base(event):
+        return dict(
+            tx=Web3.to_hex(event["transactionHash"]),
+            block=event["blockNumber"],
+            index=event["logIndex"],
+            timestamp=timestamp(event["blockNumber"]),
+        )
 
     def row(event):
         tx = Web3.to_hex(event["transactionHash"])
         if tx not in rows:
-            rows[tx] = dict(
-                tx=tx,
-                block=event["blockNumber"],
-                index=event["logIndex"],
-                timestamp=timestamp(event["blockNumber"]),
-            )
+            rows[tx] = base(event)
         return rows[tx]
 
     for e in snapshots:
@@ -233,9 +244,17 @@ def activity(snapshots, sales, payments, shares, timestamp):
             vyper_crv=a["vyper_crv"],
         )
     for e in payments:
-        r = row(e)
-        r.update(kind="payment", usdc=e["args"]["usdc"])
-    return sorted(rows.values(), key=lambda r: (r["block"], r["index"]), reverse=True)
+        a = e["args"]
+        transfers.append(dict(base(e), kind="payment", usdc=a["usdc"], recipient=a["recipient"]))
+    for kind, events, to in [("withdrawal", withdrawals, "recipient"), ("recovery", recoveries, "receiver")]:
+        for e in events:
+            a = e["args"]
+            transfers.append(
+                dict(base(e), kind=kind, token=a["token"], amount=a["amount"], recipient=a[to])
+            )
+    return sorted(
+        [*rows.values(), *transfers], key=lambda r: (r["block"], r["index"]), reverse=True
+    )
 
 
 def serialize(value):

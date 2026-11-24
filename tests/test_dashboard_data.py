@@ -64,5 +64,33 @@ def test_transactions_group_by_hash_newest_first():
     assert retain["crv"] == retain["vyper_crv"] == 112 * UNIT
     assert retain["share"] == SHARE and retain["timestamp"] == 360
     assert payment["usdc"] == 12_500 * 10**6
+    assert payment["recipient"] == ADDRESSES["receiver"]
     assert manual["manual"] is True and manual["share"] == 0
     assert checkpoint["share"] == SHARE and checkpoint["manual"] is False
+
+
+
+def test_transfers_out_each_get_a_row_with_their_recipient():
+    """A Safe batch can pay, withdraw and recover in one transaction beside a work call."""
+    snapshots = [event(7, 40, 0, week=WEEK_START, yearn=1, total=4, manual=False)]
+    sales = [event(7, 40, 3, week=WEEK_START, crv=8 * UNIT, usdc=4 * 10**6, yearn=10**6,
+                   yearn_receiver=ADDRESSES["receiver"], vyper_crv=0)]
+    payments = [event(7, 40, 5, usdc=6_000 * 10**6, recipient=ADDRESSES["governance"])]
+    withdrawals = [
+        event(7, 40, 6, token=ADDRESSES["usdc"], amount=10**6, recipient=ADDRESSES["manager"]),
+        event(7, 40, 7, token=ADDRESSES["crv"], amount=3 * UNIT, recipient=ADDRESSES["receiver"]),
+    ]
+    recoveries = [event(8, 41, 0, token=ADDRESSES["vault"], amount=5, receiver=ADDRESSES["governance"])]
+    rows = activity(snapshots, sales, payments, {WEEK_START: SHARE}, lambda block: block * 12,
+                    withdrawals, recoveries)
+
+    assert [(r["kind"], r["index"]) for r in rows] == [
+        ("recovery", 0), ("withdrawal", 7), ("withdrawal", 6), ("payment", 5), ("work", 0)
+    ]
+    recovery, crv, usdc, payment, work = rows
+    assert (recovery["token"], recovery["amount"], recovery["recipient"]) == (
+        ADDRESSES["vault"], 5, ADDRESSES["governance"])
+    assert (crv["token"], crv["amount"], crv["recipient"]) == (
+        ADDRESSES["crv"], 3 * UNIT, ADDRESSES["receiver"])
+    assert usdc["recipient"] == ADDRESSES["manager"] and payment["recipient"] == ADDRESSES["governance"]
+    assert work["yearn_usdc"] == 10**6 and {r["tx"] for r in rows[1:]} == {work["tx"]}

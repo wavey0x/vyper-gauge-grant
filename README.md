@@ -142,7 +142,7 @@ Funding amounts use 6-decimal USDC; proceeds quotes, minimums, balances and allo
 
 The dashboard is one page, [`dashboard/template.html`](dashboard/template.html), with no build step or external scripts. It shows a report from `vyper-grant report`, which reads every value at the latest mined block and rechecks that block's hash before writing. The token icons are embedded in the page: USDC from the [CoW Protocol token list](https://github.com/cowprotocol/token-lists) and CRV from [Llama Airforce](https://github.com/Llama-Airforce/Llama-Airforce).
 
-The chart plots Yearn's cumulative USDC proceeds against the 100,000 USDC target from [budget request #356](https://github.com/yearn/budget/issues/356), and the budget left: 100,000 USDC minus the funding payments made so far. That budget figure is not the FundingEscrow balance, which the Funding balance shows.
+The page leads with two figures from [budget request #356](https://github.com/yearn/budget/issues/356): Yearn's cumulative USDC proceeds against the 100,000 USDC target, and its funding payments against the 100,000 USDC spending cap. The chart plots both over time. Proceeds are realized USDC from sales; the request credits Vyper funding by valuing attributable CRV, which this page does not compute. Below them are the three escrow holdings. History lists each claim's split and every transfer out of an escrow (funding payments, withdrawals and recoveries) with its recipient.
 
 ```sh
 uv run python -m vyper_grant.server             # live page at http://127.0.0.1:8787
