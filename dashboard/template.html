@@ -84,8 +84,10 @@ main{padding-top:20px;padding-bottom:48px}
 .tag{margin-left:8px;padding:1px 6px;border-radius:4px;background:var(--soft);color:var(--muted);font:11px var(--sans);vertical-align:1px}
 .count{margin-left:6px;padding:1px 6px;border-radius:4px;background:var(--soft);color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}.count:empty{display:none}
 .none{margin:0;padding:28px 16px;text-align:center;color:var(--muted)}
-.chart{padding:16px 16px 8px}
+.strip{padding:16px}.strip .figures{margin-bottom:0}
+.chart{margin-bottom:14px;padding:16px 16px 8px}
 .figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:0 4px 12px}.figures.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.figures.four{grid-template-columns:repeat(4,minmax(0,1fr))}
 .votes{margin-bottom:14px;padding:16px 16px 8px}.votes .figure strong{font-size:16px;line-height:22px;letter-spacing:-.3px}
 .key.square{width:8px;height:8px;border-radius:2px}#bars{position:relative}#bars svg{overflow:visible;stroke-width:1}#bars svg:focus-visible{outline:2px solid var(--muted);outline-offset:4px}
 .bar{stroke:none}.bar.yearn{fill:var(--accent)}.bar.others{fill:var(--second)}.pending{opacity:.45}.upcoming td,.due{color:var(--muted)}td .dot{display:inline-block;margin-left:9px;vertical-align:1px}
@@ -122,8 +124,10 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 .check,.act.copied .copy{display:none}.act.copied .check{display:block}.act.copied{color:var(--live)}
 @media(hover:none){.address .act{opacity:1}}
 @media(min-width:960px){table{table-layout:fixed}.c-date{width:17%}.c-hold{width:32%}.c-link{width:44px}.h-age{width:12%}.h-num{width:14%}.h-paid{width:27%}.w-vote{width:7.5%}.w-share{width:8%}.w-claim{width:13%}.w-paid{width:12%}.w-eff{width:11%}}
+/* Four figures across need about 860px; narrower, they sit two by two. */
+@media(max-width:860px){.figures.four{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 0}.figures.four .figure:nth-child(odd){padding-left:0;border-left:0}}
 @media(max-width:600px){.bar,main{padding-left:16px;padding-right:16px}.full{display:none}.short{display:inline}.address .act{opacity:1}
-  .figure strong{font-size:19px;line-height:26px}.figure+.figure{padding-left:14px}.chart .figure .unit{font-size:0}
+  .figure strong{font-size:19px;line-height:26px}.figure+.figure{padding-left:14px}
   .figures.three{grid-template-columns:1fr 1fr;gap:10px 0}.figures.three .figure:nth-child(3){grid-column:1/-1;display:flex;align-items:baseline;gap:8px;padding:10px 0 0;border-left:0;border-top:1px solid var(--soft)}.figures.three .figure:nth-child(3) .label{margin:0}
   #plot{min-height:160px}
   /* Table rows stack: a title line with its time, result or link, then the amounts on a
@@ -161,13 +165,13 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 <h1 class="visually-hidden">Vyper funding</h1>
 <p class="notice" id="demo" hidden>Illustrative data</p>
 <div id="notices" role="status"></div>
-<section class="card chart" id="chart" aria-label="Progress">
-<div class="figures three">
-<div class="figure"><strong><span id="earned">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span>USDC</span></strong><span class="label"><i class="key"></i>Yearn proceeds<button class="act info" id="tip-earned" type="button"></button></span></div>
-<div class="figure"><strong><span id="spent">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span>USDC</span></strong><span class="label"><i class="key budget"></i>Budget spent<button class="act info" id="tip-spent" type="button"></button></span></div>
+<section class="card strip" aria-label="Progress">
+<div class="figures four">
+<div class="figure"><strong><span id="earned">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span><span class="visually-hidden">USDC</span></span></strong><span class="label">Yearn proceeds<button class="act info" id="tip-earned" type="button"></button></span></div>
+<div class="figure"><strong><span id="spent">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span><span class="visually-hidden">USDC</span></span></strong><span class="label">Budget spent<button class="act info" id="tip-spent" type="button"></button></span></div>
+<div class="figure"><strong><span id="left">—</span><span class="unit"><span class="token usdc" aria-hidden="true"></span><span class="visually-hidden">USDC</span></span></strong><span class="label">Budget left<button class="act info" id="tip-left" type="button"></button></span></div>
 <div class="figure"><strong id="return">—</strong><span class="label">Efficiency<button class="act info" id="tip-return" type="button"></button></span></div>
 </div>
-<div id="plot"></div>
 </section>
 <div id="views" hidden>
 <div class="tabs" role="tablist" aria-label="Views">
@@ -175,7 +179,10 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 <button id="tab-weeks" type="button" role="tab" aria-controls="weekly" data-view="voting">Voting<span class="count" id="weekly-count"></span></button>
 <button id="tab-info" type="button" role="tab" aria-controls="info" data-view="info">Info</button>
 </div>
-<section class="card scroll stack" id="history" role="tabpanel" aria-labelledby="tab-history"><table><thead><tr><th scope="col" class="h-age" id="time-head">Age</th><th scope="col" class="text">Event</th><th scope="col" class="h-num">Claimed</th><th scope="col" class="h-num">Yearn</th><th scope="col" class="h-num">Vyper</th><th scope="col" class="h-paid">Paid out</th><th scope="col" class="c-link"><span class="visually-hidden">Transaction</span></th></tr></thead><tbody id="transactions"></tbody></table><p class="none">No transactions yet</p></section>
+<section id="history" role="tabpanel" aria-labelledby="tab-history">
+<div class="card chart"><div id="plot"></div></div>
+<div class="card scroll stack"><table><thead><tr><th scope="col" class="h-age" id="time-head">Age</th><th scope="col" class="text">Event</th><th scope="col" class="h-num">Claimed</th><th scope="col" class="h-num">Yearn</th><th scope="col" class="h-num">Vyper</th><th scope="col" class="h-paid">Paid out</th><th scope="col" class="c-link"><span class="visually-hidden">Transaction</span></th></tr></thead><tbody id="transactions"></tbody></table><p class="none">No transactions yet</p></div>
+</section>
 <section id="weekly" role="tabpanel" aria-labelledby="tab-weeks">
 <div class="card votes" id="votes" hidden>
 <div class="figures three">
@@ -465,6 +472,7 @@ const svg = (tag, attrs = {}, text) => {
 const goal = TARGET.toLocaleString('en-US');
 label(el('tip-earned'), `USDC from selling Yearn's share of the gauge's CRV. Target ${goal}.`);
 label(el('tip-spent'), `USDC paid from the funding escrow for votes. Cap ${goal}.`);
+label(el('tip-left'), `The ${goal} cap less what has been spent.`);
 label(el('tip-emissions'), "The gauge's share of this week's CRV emissions.");
 label(el('tip-receiver'), 'Any address but the Vyper multisig: CRV sent there is swept up and split again.');
 function renderChart() {
@@ -477,16 +485,17 @@ function renderChart() {
     return [[t0, 0], ...events.sort((a, b) => a[0] - b[0])
       .map(([t, change]) => [Math.min(Math.max(t, t0), t1), value += change])];
   };
-  // Drawn in this order, so the proceeds line sits on top where the two overlap.
+  // Drawn in this order, so the proceeds line sits on top where the two overlap. The short
+  // name labels the line's end; the long one heads its row in the tooltip.
   const lines = [
-    ['budget', 'Budget spent', steps((report.payments ?? []).map(p => [Number(p.timestamp), usd(p.usdc)]))],
+    ['budget', 'Budget spent', steps((report.payments ?? []).map(p => [Number(p.timestamp), usd(p.usdc)])), 'Spent'],
     ['proceeds', 'Yearn proceeds', steps((report.transactions ?? []).filter(t => t.kind === 'work')
-      .map(t => [Number(t.timestamp), usd(t.yearn_usdc)]))],
+      .map(t => [Number(t.timestamp), usd(t.yearn_usdc)])), 'Proceeds'],
   ];
   const at = (points, t) => points.reduce((value, [time, v]) => time <= t ? v : value, points[0][1]);
   const last = points => points[points.length - 1][1];
 
-  const H = W < 480 ? 160 : 190, left = 36, right = W - 54, top = 18, bottom = H - 22;
+  const H = W < 480 ? 160 : 190, left = 36, right = W - 100, top = 18, bottom = H - 22;
   const peak = Math.max(TARGET, ...lines.flatMap(line => line[2].map(point => point[1])));
   const x = t => left + (t - t0) / (t1 - t0) * (right - left);
   const y = v => bottom - v / peak * (bottom - top);
@@ -506,11 +515,12 @@ function renderChart() {
     root.append(svg('text', {class: 'tick', x: right, y: H - 4, 'text-anchor': 'end'}, day(t1)));
   }
 
-  // End labels sit beside their dots, nudged apart when the two lines finish close together.
+  // End labels sit beside their dots, nudged apart when the two lines finish close together;
+  // proceeds takes the upper place when they finish level.
   const ends = lines.map(line => y(last(line[2])));
-  const order = ends[0] <= ends[1] ? [0, 1] : [1, 0];
-  const labels = [...ends], tied = ends[0] === ends[1];
-  if (!tied && Math.abs(ends[0] - ends[1]) < 14) {
+  const order = ends[0] < ends[1] ? [0, 1] : [1, 0];
+  const labels = [...ends];
+  if (Math.abs(ends[0] - ends[1]) < 14) {
     const middle = (ends[0] + ends[1]) / 2;
     labels[order[0]] = middle - 7;
     labels[order[1]] = middle + 7;
@@ -520,10 +530,10 @@ function renderChart() {
   for (const [name, , points] of lines) {
     root.append(svg('path', {class: 'line ' + name, 'stroke-linejoin': 'round', d: trace(points)}));
   }
-  lines.forEach(([name, , points], i) => {
-    root.append(svg('circle', {class: 'dot ' + name, cx: right, cy: ends[i], r: 4}));
-    // Two lines ending on the same value share one label.
-    if (!tied || i) root.append(svg('text', {class: 'end', x: right + 9, y: labels[i] + 4}, compact(last(points))));
+  lines.forEach(([name, , points, short], i) => {
+    const end = svg('text', {class: 'end', x: right + 9, y: labels[i] + 4}, compact(last(points)));
+    end.append(svg('tspan', {class: 'tick', dx: 5}, short));
+    root.append(svg('circle', {class: 'dot ' + name, cx: right, cy: ends[i], r: 4}), end);
   });
 
   // Hover or focus reads every series at one moment; arrow keys walk the transactions.
@@ -703,8 +713,12 @@ function renderReport() {
     el('notices').append(p);
   }
   if (report.funding_assets != null) {
+    // What is left under the cap, which can differ from the escrow's balance: yield and top-ups add to it.
+    const left = BigInt(TARGET) * 10n ** 6n - big(report.spent);
     el('earned').textContent = amount(report.totals?.yearn, 6);
     el('spent').textContent = amount(report.spent, 6);
+    el('left').textContent = amount(left > 0n ? left : 0n, 6);
+    label(el('tip-left'), `The ${goal} cap less what has been spent. The funding escrow holds ${amount(report.funding_assets, 6)}.`);
   }
 
   // One row per week, newest first: the votes, the incentive paid for them and what they produced.
