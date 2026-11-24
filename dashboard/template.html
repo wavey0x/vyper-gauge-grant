@@ -91,7 +91,7 @@ main{padding-top:20px;padding-bottom:48px}
 .bar{stroke:none}.bar.yearn{fill:var(--accent)}.bar.others{fill:var(--second)}.pending{opacity:.45}.upcoming td,.due{color:var(--muted)}td .dot{display:inline-block;margin-left:9px;vertical-align:1px}
 .groups th{padding:9px 8px 0;border-bottom:0;text-align:center;color:var(--faint)}.groups+tr th{padding-top:4px}
 .figure{min-width:0}.figure+.figure{padding-left:20px;border-left:1px solid var(--soft)}
-.figure strong{font-size:24px;line-height:30px;letter-spacing:-.5px}.figure .label{margin-top:2px}
+.figure strong{font-size:24px;line-height:30px;letter-spacing:-.5px}.figure .label{margin-top:2px}.figure strong.empty{color:var(--faint)}
 .key{display:inline-block;width:12px;height:2px;margin-right:6px;border-radius:1px;vertical-align:middle;background:var(--accent)}.key.budget{background:var(--second)}
 #plot{position:relative;min-height:190px}#plot svg{overflow:visible;stroke-width:1;touch-action:pan-y}#plot svg:focus-visible{outline:2px solid var(--muted);outline-offset:4px}
 .grid{stroke:var(--soft)}.goal{stroke:var(--muted);stroke-dasharray:2 4}.cross{stroke:var(--strong)}
@@ -125,13 +125,28 @@ tr:hover .address .act,.address .act:focus-visible,.act.copied{opacity:1}
 @media(max-width:600px){.bar,main{padding-left:16px;padding-right:16px}.full{display:none}.short{display:inline}.address .act{opacity:1}
   .figure strong{font-size:19px;line-height:26px}.figure+.figure{padding-left:14px}.chart .figure .unit{font-size:0}
   .figures.three{grid-template-columns:1fr 1fr;gap:10px 0}.figures.three .figure:nth-child(3){grid-column:1/-1;display:flex;align-items:baseline;gap:8px;padding:10px 0 0;border-left:0;border-top:1px solid var(--soft)}.figures.three .figure:nth-child(3) .label{margin:0}
-  /* Table rows stack: a title with its time and link, then each amount under its own name. */
+  #plot{min-height:160px}
+  /* Table rows stack: a title line with its time, result or link, then the amounts on a
+     three-column grid, each under its own name, so a column lines up from row to row. */
   .stack table,.stack tbody{display:block}.stack thead{display:none}
-  .stack tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;padding:11px 16px;border-bottom:1px solid var(--soft)}
-  .stack tr:last-child{border-bottom:0}.stack tr::before{content:"";order:4;flex-basis:100%}
-  .stack td{order:5;height:auto;padding:0;border:0;text-align:left}.stack td.empty{display:none}
-  .stack td.title{order:1;flex:1 1 auto;font-size:13px}.stack td.meta{order:2;font-size:11px;color:var(--muted)}.stack td.link{order:3}
-  .stack td[data-label]::before{content:attr(data-label);margin-right:6px;font:11px var(--sans);color:var(--muted)}}
+  .stack tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:10px 12px;padding:12px 16px;border-bottom:1px solid var(--soft)}
+  .stack tr:last-child{border-bottom:0}
+  .stack td{min-width:0;height:auto;padding:0;border:0;text-align:left;font-size:13px;white-space:normal}.stack td.empty{display:none}
+  .stack td.title,.stack td.meta,.stack td.link{grid-row:1;grid-column:1/-1;align-self:center}
+  .stack td.title{font-weight:500}.stack td.meta,.stack td.link{justify-self:end}.stack td.meta{font-size:11px;color:var(--muted)}
+  .stack td[data-label]::before{content:attr(data-label);display:block;margin-bottom:2px;font:400 11px/1.3 var(--sans);color:var(--muted)}
+  .stack .plus{display:block;height:0;overflow:hidden}.stack .claim{display:block;margin:8px 0 0}
+  #transactions td.meta{margin-right:30px}#transactions td:nth-child(6){grid-column:1/-1}
+  /* A week's efficiency sits on its title line; its other figures keep their places, a dash when empty. */
+  #weeks td:nth-child(8){grid-row:1;grid-column:1/-1;justify-self:end;align-self:center}
+  #weeks td:nth-child(8)::before{display:inline;margin-right:6px}#weeks td.empty:not(:nth-child(8)){display:block}
+  #addresses tr{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .about .aside{display:block;margin:2px 0 0}
+  .modal{margin:64px auto auto}}
+/* Fingers need more room than the icons take: each icon button answers a little beyond its edge. */
+@media(pointer:coarse){.act{position:relative}.act::after{content:"";position:absolute;inset:-7px}.address{gap:10px}
+  .time{padding:8px 0;margin:-8px 0}.claim{padding:4px 10px}.modal-actions .button{padding:8px 16px}
+  .input{height:40px;font-size:16px}}
 @media(prefers-reduced-motion:reduce){.dot::after{animation:none}}
 </style>
 <header class="topbar"><div class="bar">
@@ -280,7 +295,7 @@ const split = (usdc, crv, format = amount) => {
   const parts = [];
   for (const [x, d, symbol] of [[usdc, 6, 'USDC'], [crv, 18, 'CRV']]) {
     if (big(x) <= 0n) continue;
-    if (parts.length) parts.push(' + ');
+    if (parts.length) parts.push(span('plus', ' + '));
     parts.push(format(x, d), token(symbol));
   }
   return parts.length ? parts : '—';
@@ -471,7 +486,7 @@ function renderChart() {
   const at = (points, t) => points.reduce((value, [time, v]) => time <= t ? v : value, points[0][1]);
   const last = points => points[points.length - 1][1];
 
-  const H = 190, left = 36, right = W - 54, top = 18, bottom = H - 22;
+  const H = W < 480 ? 160 : 190, left = 36, right = W - 54, top = 18, bottom = H - 22;
   const peak = Math.max(TARGET, ...lines.flatMap(line => line[2].map(point => point[1])));
   const x = t => left + (t - t0) / (t1 - t0) * (right - left);
   const y = v => bottom - v / peak * (bottom - top);
@@ -721,6 +736,7 @@ function renderReport() {
     spent += big(drawn[week.week]);
   }
   el('return').textContent = spent > 0n ? times(earned, spent) : '—';
+  el('return').classList.toggle('empty', spent === 0n);
   label(el('tip-return'), spent > 0n
     ? `Proceeds per USDC spent over completed weeks: ${amount(earned, 6)} earned for ${amount(spent, 6)} spent. This week counts once it ends.`
     : 'Proceeds per USDC spent over completed weeks. 1.10× means $1.10 earned for every $1 spent.');
