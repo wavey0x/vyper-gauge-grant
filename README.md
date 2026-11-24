@@ -157,7 +157,7 @@ The local server listens on loopback only and rebuilds the report when the head 
 Hosting follows the stYFI dashboard: static files on Vercel and a collector on Electro. Neither is set up by this repository.
 
 - **Page:** [`vercel.json`](vercel.json) publishes `dashboard/`, serves the template at `/` and forwards `/report.json` to `https://api.wavey.info/api/vyper-grant/report`.
-- **Collector:** [`deploy/systemd`](deploy/systemd) runs `vyper-grant report` every minute as `svc-vyper-grant` against Electro's loopback node. It replaces `/var/lib/vyper-grant/report.json` atomically with mode 0644; a failed run leaves the previous file in place. Each run rescans events from `deployment_block`, so runs lengthen as the chain grows.
+- **Collector:** [`deploy/systemd`](deploy/systemd) runs `vyper-grant report` every minute as `svc-vyper-grant` against Electro's loopback node. It replaces `/var/lib/vyper-grant/report.json` atomically with mode 0644; a failed run leaves the previous file in place. With `report --checkpoint`, the first run scans both escrows together from `deployment_block`. Later runs scan from the next block and still read balances and votes at the latest head. The private `.events.json` file keeps event logs, timestamps and the last scanned block hash. A missing or incompatible checkpoint or a replaced block triggers a full rebuild.
 - **Route:** [`deploy/caddy/vyper-grant.caddy`](deploy/caddy/vyper-grant.caddy), imported by the `api.wavey.info` site, serves only that file.
 
 Code and venv live in `/opt/vyper-grant`, root-owned and readable by `svc-vyper-grant`; install the package into the venv without the `dev` extra. The unit reads [`config/mainnet.json`](config/mainnet.json).

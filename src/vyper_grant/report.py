@@ -1,8 +1,11 @@
 """A static, self-contained report; no browser RPC or external scripts."""
 
 import json
+import os
 from pathlib import Path
+from .chain import report_at_head
 from .core import ROOT, atomic_json
+from .history import save_checkpoint, scan_history
 
 
 def page(data):
@@ -23,3 +26,22 @@ def render(data, out):
     (out / "index.html").write_text(page(data))
     # World-readable: on the server a web server under another user serves this file.
     atomic_json(out / "report.json", data, mode=0o644)
+
+
+def collect(client, config, out):
+    """Publish the report before advancing the private event checkpoint."""
+    import fcntl
+
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    checkpoint = out / ".events.json"
+    directory = os.open(out, os.O_RDONLY)
+    try:
+        # Lock the directory: both the report and checkpoint are atomically replaced.
+        fcntl.flock(directory, fcntl.LOCK_EX)
+        head = client.eth.get_block("latest")
+        history = scan_history(client, config, head, checkpoint)
+        render(report_at_head(client, config, head, history), out)
+        save_checkpoint(checkpoint, history)
+    finally:
+        os.close(directory)

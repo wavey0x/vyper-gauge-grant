@@ -2,6 +2,7 @@
 
 from web3 import Web3
 from .core import ADDRESSES, WEEK, artifact, contract, named
+from .history import decode_history, scan_history
 
 
 def verify(client, c, block="latest", names=("funding", "proceeds")):
@@ -24,14 +25,6 @@ def verify(client, c, block="latest", names=("funding", "proceeds")):
             if instance.functions[getter]().call(block_identifier=block) != value:
                 raise ValueError(f"Unexpected {name} {getter}")
     return tuple(contracts[n] for n in names)
-
-
-def logs(client, event, start, end):
-    return [
-        log
-        for first in range(start, end + 1, 2000)
-        for log in event.get_logs(from_block=first, to_block=min(first + 1999, end))
-    ]
 
 
 def historical_vote(client, week, final):
@@ -107,30 +100,23 @@ def report(client, c, *, head=None):
     """Read everything at one block: the latest mined block unless `head` is given."""
     if head is None:
         head = client.eth.get_block("latest")
+    return report_at_head(client, c, head, scan_history(client, c, head))
+
+
+def report_at_head(client, c, head, history):
     block = head["number"]
-    if c.get("deployment_block") is None or not 0 <= c["deployment_block"] <= block:
-        raise ValueError("deployment_block must be within the report block range")
     funding, proceeds = [contract(client, n, c[n]) for n in ["funding", "proceeds"]]
+    events, times = decode_history(history["logs"], funding, proceeds)
+
     def read(fn):
         return fn.call(block_identifier=block)
 
-    def events(event):
-        return logs(client, event, c["deployment_block"], block)
-
-    times = {}
-
-    def timestamp(number):
-        if number not in times:
-            times[number] = client.eth.get_block(number)["timestamp"]
-        return times[number]
-
-    drawn = events(funding.events.Drawn())
-    rounds, cancels = events(funding.events.RoundFunded()), events(funding.events.Cancelled())
+    drawn = events["Drawn"]
     payments = [
         dict(
             usdc=e["args"]["usdc"],
             recipient=e["args"]["recipient"],
-            timestamp=timestamp(e["blockNumber"]),
+            timestamp=times[e["blockNumber"]],
             tx=Web3.to_hex(e["transactionHash"]),
         )
         for e in drawn
@@ -141,7 +127,7 @@ def report(client, c, *, head=None):
         for week in range(start, head["timestamp"] + 1, WEEK)
     }
     forwarded = 0
-    sales = events(proceeds.events.Sold())
+    sales = events["Sold"]
     for event in sales:
         a = event["args"]
         rows.setdefault(
@@ -175,9 +161,9 @@ def report(client, c, *, head=None):
             warnings.append("The current week needs a vote snapshot")
     if read(proceeds.functions.paused()):
         warnings.append("Sales are paused; public checkpoint remains available")
-    snapshots = events(proceeds.events.Snapshot())
+    snapshots = events["Snapshot"]
     weekly_weights(rows, snapshots)
-    withdrawals = events(proceeds.events.Withdrawn())
+    withdrawals = events["Withdrawn"]
     vyper_crv = read(
         contract(client, "token", ADDRESSES["crv"]).functions.balanceOf(proceeds.address)
     )
@@ -210,12 +196,12 @@ def report(client, c, *, head=None):
             sales,
             drawn,
             shares,
-            timestamp,
+            times.__getitem__,
             withdrawals,
-            events(funding.events.Recovered()),
-            rounds,
-            cancels,
-            events(funding.events.RecipientSet()),
+            events["Recovered"],
+            events["RoundFunded"],
+            events["Cancelled"],
+            events["RecipientSet"],
         ),
         totals={
             k: sum(r[k] for r in rows.values()) for k in ["sold", "output", "yearn", "vyper_crv"]

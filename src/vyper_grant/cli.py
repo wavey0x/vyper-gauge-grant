@@ -17,7 +17,7 @@ from .core import (
     units,
 )
 from .chain import historical_vote, report, serialize, verify
-from .report import render
+from .report import collect, render
 
 
 def batch(sender, *calls, **meta):
@@ -159,7 +159,11 @@ def main():
         k = sub.add_parser(name)
         k.add_argument("--send", action="store_true")
     r = sub.add_parser("report")
-    r.add_argument("--input", help="Render saved data instead of reading the chain")
+    source = r.add_mutually_exclusive_group()
+    source.add_argument("--input", help="Render saved data instead of reading the chain")
+    source.add_argument(
+        "--checkpoint", action="store_true", help="Reuse event history in the output directory"
+    )
     args = p.parse_args()
     out = Path(args.out)
     try:
@@ -178,7 +182,10 @@ def main():
         elif args.command == "doctor":
             result = doctor(client, c)
         elif args.command == "report":
-            render(report(client, c), out)
+            if args.checkpoint:
+                collect(client, c, out)
+            else:
+                render(report(client, c), out)
             print(str((out / "index.html").resolve()))
             return
         elif args.command == "setup":

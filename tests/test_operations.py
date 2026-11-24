@@ -104,6 +104,124 @@ def chain(monkeypatch):
     return dict(locals())
 
 
+@pytest.fixture
+def collector(chain, tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(chain["c"]))
+    monkeypatch.setattr("sys.argv", [
+        "vyper-grant", "--out", str(tmp_path), "--config", str(config), "report", "--checkpoint",
+    ])
+    eth = chain["client"].eth
+    monkeypatch.setattr("vyper_grant.cli.rpc", lambda: chain["client"])
+    get_logs = eth.get_logs
+    ranges = []
+
+    def trace(query):
+        assert set(query["address"]) == {chain["funding"].address, chain["escrow"].address}
+        ranges.append((query["fromBlock"], query["toBlock"]))
+        return get_logs(query)
+
+    monkeypatch.setattr(eth, "get_logs", trace)
+
+    def run():
+        ranges.clear()
+        main()
+        return json.loads((tmp_path / "report.json").read_text())
+
+    return run, ranges
+
+
+def test_checkpoint_advances_past_empty_blocks_and_keeps_every_event(chain, collector, tmp_path):
+    run, ranges = collector
+    client, tester = chain["client"], chain["tester"]
+    first = client.eth.block_number
+    run()
+    assert ranges == [(1, first)]
+    tester.mine_blocks(3)
+    empty = run()
+    assert ranges == [(first + 1, first + 3)]
+    assert run() == empty and ranges == []
+
+    # The first sale after a week boundary emits both Snapshot and Sold.
+    tester.time_travel(chain["start"] + 10)
+    amount = chain["escrow"].functions.claimable().call()
+    tx = chain["escrow"].functions.work(0, amount, True).transact({"from": chain["keeper"]})
+    data = run()
+    assert ranges == [(first + 4, client.eth.block_number)]
+    assert data == report(client, chain["c"])
+    saved = json.loads((tmp_path / ".events.json").read_text())
+    sale_logs = [log for log in saved["logs"] if log["transactionHash"] == Web3.to_hex(tx)]
+    assert len({log["logIndex"] for log in sale_logs}) == 2
+    assert data["transactions"][0]["kind"] == "work"
+    assert run() == data and ranges == []
+
+
+def test_checkpoint_rebuilds_after_same_height_reorg_and_cache_loss(chain, collector, tmp_path):
+    run, ranges = collector
+    tester, client = chain["tester"], chain["client"]
+    snapshot = tester.take_snapshot()
+    chain["funding"].functions.fund_round(100).transact({"from": chain["manager"]})
+    old = run()
+    tester.revert_to_snapshot(snapshot)
+    chain["funding"].functions.fund_round(200).transact({"from": chain["manager"]})
+    fresh = run()
+    assert fresh["block"] == old["block"] and fresh["block_hash"] != old["block_hash"]
+    assert ranges == [(1, client.eth.block_number)]
+    assert fresh == report(client, chain["c"])
+    assert [e["usdc"] for e in fresh["transactions"] if e["kind"] == "round"] == ["200"]
+
+    path = tmp_path / ".events.json"
+    damaged = json.loads(path.read_text())
+    damaged["logs"].clear()
+    path.write_text(json.dumps(damaged))
+    assert run() == fresh and ranges == [(1, client.eth.block_number)]
+    path.write_text("{")
+    assert run() == fresh and ranges == [(1, client.eth.block_number)]
+
+
+def test_checkpoint_retries_failed_scan_and_failed_checkpoint_write(chain, collector, tmp_path, monkeypatch):
+    run, ranges = collector
+    eth = chain["client"].eth
+    old = run()
+    path = tmp_path / ".events.json"
+    saved = path.read_bytes()
+    chain["funding"].functions.fund_round(100).transact({"from": chain["manager"]})
+
+    def fail(*args):
+        raise OSError("injected failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(eth, "get_logs", fail)
+        with pytest.raises(SystemExit):
+            run()
+    assert json.loads((tmp_path / "report.json").read_text()) == old
+    assert path.read_bytes() == saved
+
+    # A reorg after the scan but before publication must leave both files intact.
+    get_block = eth.get_block
+    height = eth.block_number
+
+    def replaced_head(identifier, *args, **kwargs):
+        block = get_block(identifier, *args, **kwargs)
+        return {**block, "hash": bytes(32)} if identifier == height else block
+
+    with monkeypatch.context() as patch:
+        patch.setattr(eth, "get_block", replaced_head)
+        with pytest.raises(SystemExit):
+            run()
+    assert json.loads((tmp_path / "report.json").read_text()) == old
+    assert path.read_bytes() == saved
+
+    with monkeypatch.context() as patch:
+        patch.setattr("vyper_grant.report.save_checkpoint", fail)
+        with pytest.raises(SystemExit):
+            run()
+    published = json.loads((tmp_path / "report.json").read_text())
+    assert published != old and path.read_bytes() == saved
+    assert run() == published and ranges == [(int(old["block"]) + 1, eth.block_number)]
+    assert published == report(chain["client"], chain["c"])
+
+
 def begin(s):
     s["funding"].functions.fund_round(2000 * 10**6).transact(
         {"from": s["manager"]}
