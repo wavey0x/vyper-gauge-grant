@@ -794,7 +794,7 @@ function renderReport() {
     } else if (t.kind === 'withdrawal' || t.kind === 'recovery') {
       add(t.kind === 'withdrawal' ? 'Withdrawal' : 'Recovery', '—', '—', '—', paid(t.amount, t.token, t.recipient));
     } else if (t.kind === 'round') {
-      add('Round funded', '—', '—', '—', [...paid(t.usdc, USDC), span('aside', 'queued from ' + day(t.first_week))]);
+      add('Round funded', '—', '—', '—', paid(t.usdc, USDC));
     } else if (t.kind === 'cancel') {
       add('Round cancelled', '—', '—', '—', [...paid(t.usdc, USDC), span('aside', 'unpaid')]);
     } else if (t.kind === 'recipient') {
