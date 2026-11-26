@@ -776,7 +776,9 @@ function renderReport() {
   if (report.votes?.next) weekRow(report.votes.next, true);
   for (const week of [...report.weeks ?? []].reverse()) weekRow(week, false);
 
-  // A claim is split between Yearn and Vyper; anything leaving an escrow is listed with where it went.
+  // Activity lists money as it moves: each claim's split between Yearn and Vyper, and anything
+  // leaving an escrow with where it went. A week's split and the payment schedule are bookkeeping;
+  // Voting shows them as each week's share and its due payments.
   const cells = {0: 'meta', 1: 'text title', 6: 'link'}, names = ['', '', 'Claimed', 'Yearn', 'Vyper', 'Paid'];
   for (const t of report.transactions ?? []) {
     if (!/^0x[0-9a-fA-F]{64}$/.test(t.tx ?? '')) continue;
@@ -786,21 +788,12 @@ function renderReport() {
     if (t.kind === 'work') {
       add(big(t.crv) > big(t.vyper_crv) ? 'Sale' : 'Retained', [amount(t.crv, 18), token('CRV')],
         split(t.yearn_usdc, 0), split(t.vyper_usdc, t.vyper_crv), '—');
-    } else if (t.kind === 'checkpoint') {
-      const yearn = bps(t.share);
-      add(t.manual ? 'Manual split' : 'Weekly split', '—', pct(yearn), pct(10000n - yearn), '—');
     } else if (t.kind === 'payment') {
       // Reports from before recipients were recorded fall back to the current one.
       const recipient = t.recipient ?? report.funding_recipient;
       add('Incentive payment', '—', '—', '—', paid(t.usdc, USDC, same(recipient, FEE_BURNER) ? null : recipient));
     } else if (t.kind === 'withdrawal' || t.kind === 'recovery') {
       add(t.kind === 'withdrawal' ? 'Withdrawal' : 'Recovery', '—', '—', '—', paid(t.amount, t.token, t.recipient));
-    } else if (t.kind === 'round') {
-      add('Round funded', '—', '—', '—', paid(t.usdc, USDC));
-    } else if (t.kind === 'cancel') {
-      add('Round cancelled', '—', '—', '—', [...paid(t.usdc, USDC), span('aside', 'unpaid')]);
-    } else if (t.kind === 'recipient') {
-      add('Recipient set', '—', '—', '—', party(t.recipient));
     }
   }
 
