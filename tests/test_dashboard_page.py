@@ -47,6 +47,10 @@ def test_vercel_serves_the_template_and_forwards_the_report():
     rewrites = {r["source"]: r["destination"] for r in config["rewrites"]}
     assert (ROOT / config["outputDirectory"] / rewrites["/"].lstrip("/")).is_file()
     assert rewrites["/report.json"].startswith("https://")
+    # Served through the rewrite, the page would otherwise name itself template.html, and
+    # Telegram then previews it as a file rather than a page.
+    root = {h["key"]: h["value"] for rule in config["headers"] if rule["source"] == "/" for h in rule["headers"]}
+    assert root["Content-Disposition"] == "inline"
 
 
 def test_preview_figures_round_like_the_page():

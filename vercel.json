@@ -4,5 +4,11 @@
   "rewrites": [
     { "source": "/", "destination": "/template.html" },
     { "source": "/report.json", "destination": "https://api.wavey.info/api/vyper-grant/report" }
+  ],
+  "headers": [
+    {
+      "source": "/",
+      "headers": [{ "key": "Content-Disposition", "value": "inline" }]
+    }
   ]
 }
