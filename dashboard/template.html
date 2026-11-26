@@ -311,8 +311,9 @@ const TOKENS = {
   [CRV]: ['CRV', 18],
   '0xbe53a109b494e5c9f97b9cd39fe969be68bf6204': ['yvUSDC-1', 6],
 };
+const FEE_BURNER = '0xb911fcce8d5afcec73e072653107260bb23c1ee8';
 const NAMED = {
-  '0xb911fcce8d5afcec73e072653107260bb23c1ee8': 'Fee burner',
+  [FEE_BURNER]: 'Fee burner',
   '0x70ccbe10f980d80b7ebaab7d2e3a73e87d67b775': 'Vyper multisig',
 };
 const isAddress = value => /^0x[0-9a-fA-F]{40}$/.test(value ?? '');
@@ -790,7 +791,8 @@ function renderReport() {
       add(t.manual ? 'Manual split' : 'Weekly split', '—', pct(yearn), pct(10000n - yearn), '—');
     } else if (t.kind === 'payment') {
       // Reports from before recipients were recorded fall back to the current one.
-      add('Incentive payment', '—', '—', '—', paid(t.usdc, USDC, t.recipient ?? report.funding_recipient));
+      const recipient = t.recipient ?? report.funding_recipient;
+      add('Incentive payment', '—', '—', '—', paid(t.usdc, USDC, same(recipient, FEE_BURNER) ? null : recipient));
     } else if (t.kind === 'withdrawal' || t.kind === 'recovery') {
       add(t.kind === 'withdrawal' ? 'Withdrawal' : 'Recovery', '—', '—', '—', paid(t.amount, t.token, t.recipient));
     } else if (t.kind === 'round') {
