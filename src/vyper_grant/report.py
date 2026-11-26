@@ -4,8 +4,9 @@ import json
 import os
 from pathlib import Path
 from .chain import report_at_head
-from .core import ROOT, atomic_json
+from .core import ROOT, atomic_bytes, atomic_json
 from .history import save_checkpoint, scan_history
+from .share import image
 
 
 def page(data):
@@ -24,8 +25,12 @@ def render(data, out):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(page(data))
-    # World-readable: on the server a web server under another user serves this file.
+    # World-readable: on the server a web server under another user serves these files.
     atomic_json(out / "report.json", data, mode=0o644)
+    # The link-preview image, rewritten only when its figures or day change.
+    preview, png = out / "og.png", image(data)
+    if not preview.exists() or preview.read_bytes() != png:
+        atomic_bytes(preview, png, mode=0o644)
 
 
 def collect(client, config, out):

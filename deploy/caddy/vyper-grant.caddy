@@ -8,6 +8,14 @@ handle /api/vyper-grant/* {
 			encode gzip
 			file_server
 		}
+		# The link-preview image the page's og:image names.
+		handle /api/vyper-grant/og.png {
+			root * /var/lib/vyper-grant
+			rewrite * /og.png
+			header Access-Control-Allow-Origin "*"
+			header Cache-Control "public, max-age=300"
+			file_server
+		}
 		# Never expose anything else under the data directory.
 		handle {
 			respond 404

@@ -120,13 +120,17 @@ def named(fn, block="latest"):
 
 def atomic_json(path, data, mode=None):
     """Replace `path` in one step. The file is owner-only unless `mode` is given."""
+    atomic_bytes(path, (json.dumps(data, indent=2) + "\n").encode(), mode)
+
+
+def atomic_bytes(path, data, mode=None):
+    """Replace `path` with `data` in one step. The file is owner-only unless `mode` is given."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix="." + path.name)
     try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
         if mode is not None:
